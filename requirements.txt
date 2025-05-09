@@ -1,0 +1,42 @@
+# Web Framework
+fastapi>=0.110.0
+sse-starlette>=1.6.5
+starlette>=0.36.3
+uvicorn[standard]>=0.29.0
+
+# Streaming & SSE
+aiohttp>=3.9.0
+
+# Cache / Checkpoint
+redis[async]>=5.0.0
+pymongo>=4.6.0
+motor>=3.4.0  # for AsyncIOMotorClient
+
+# LangChain + LangGraph
+langchain>=0.1.0
+langchain-openai>=0.0.5
+langgraph>=0.0.10
+langfuse>=2.0.0
+langchain-cohere>=0.0.6  # nếu bạn đang dùng ChatCohere
+
+# Pydantic & Settings
+pydantic>=2.0
+pydantic-settings>=2.0.1
+typing-extensions>=4.9.0
+
+# Config & Env
+python-dotenv>=1.0.0
+pyyaml>=6.0.1
+
+# Time / Date
+pytz>=2024.1
+
+# Utility
+requests>=2.31.0
+uuid6>=2023.5.2  # nếu dùng uuid5() khác với stdlib uuid
+Levenshtein>=0.24.0  # cho fuzzy string matching
+
+#web3
+web3>=7.11.0
+
+aioredis>=2.0.1

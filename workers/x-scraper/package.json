@@ -1,0 +1,30 @@
+{
+  "name": "twitter-scraper-x",
+  "version": "1.0.0",
+  "description": "Multi-account X (Twitter) scraper with proxy, cookie login, and MongoDB storage.",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "twitter",
+    "scraper",
+    "proxy",
+    "mongodb",
+    "multi-account"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "agent-twitter-client": "^0.0.18",
+    "delay": "^6.0.0",
+    "dotenv": "^16.5.0",
+    "mongoose": "^8.14.1",
+    "node-fetch": "^3.3.2",
+    "openai": "^4.97.0",
+    "p-limit": "^6.2.0",
+    "tough-cookie": "^5.1.2",
+    "undici": "^7.8.0"
+  }
+}

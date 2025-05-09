@@ -1,0 +1,30 @@
+# Dockerfile.dev - agentx-core (for development/debug)
+FROM python:3.12-slim
+
+# Timezone & debug tools
+ENV TZ=UTC
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl wget telnet vim \
+    default-jre \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+WORKDIR /app
+COPY requirements.txt ./
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+COPY src /app/src
+COPY settings /app/configs
+
+RUN groupadd -r appuser && useradd --no-log-init -r -g appuser appuser && \
+    chown -R appuser:appuser /app
+USER appuser
+
+ENV PYTHONPATH=/app
+ENV LANGCHAIN_TRACING_V2=true
+
+# Streamlit or dev server
+CMD ["streamlit", "run", "app.py"]
