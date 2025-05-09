@@ -168,7 +168,7 @@ class RuleMatcher:
                     msg = f"<b>{token}</b> {direction} by {abs(change):.1f}% (from ${old_price:,.2f} → ${new_price:,.2f})"
                 elif condition == "price_change_24h":
                     change = m["value"]  # Phần trăm thay đổi 24h
-                    current_price = token_data.get(token, {}).get("usd", 0)  # Lấy giá hiện tại từ token_data
+                    current_price = m.get("current_price", 0)  # Lấy giá hiện tại từ match data
                     direction = "increased" if change > 0 else "decreased"
                     msg = f"<b>{token}</b> {direction} by {abs(change):.1f}% in 24h (current: ${current_price:,.2f})"
                 elif condition == "alert":

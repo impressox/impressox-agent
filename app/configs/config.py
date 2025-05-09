@@ -55,7 +55,7 @@ class GlobalConfig(BaseSettings):
     
     # Config files for production
     API_CONF: Dict[str, Any] = ConfigReaderInstance.yaml.read_config_from_file("configs/api.yaml")
-    ELK_CONF: Dict[str, Any] = ConfigReaderInstance.yaml.read_config_from_file("configs/elk_logging.yaml")
+    ELK_CONF: Dict[str, Any] = ConfigReaderInstance.yaml.read_config_from_file("configs/logging.yaml")
     LLM_CONF: Dict[str, Any] = ConfigReaderInstance.yaml.read_config_from_file("configs/llm.yaml")
     MONGO_CONF: Dict[str, Any] = ConfigReaderInstance.yaml.read_config_from_file("configs/mongo.yaml")
     REDIS_CONF: Dict[str, Any] = ConfigReaderInstance.yaml.read_config_from_file("configs/redis.yaml")

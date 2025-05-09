@@ -72,21 +72,26 @@ class NotifyDispatcher:
             
             # Get recent notifications for this user/channel
             recent_key = f"notify:recent:{notification.channel.value}:{notification.user}"
-            recent_messages = await self.redis.lrange(recent_key, 0, -1)
             
             # Check if this message is in recent messages
-            if message_hash.encode() in recent_messages:
+            is_member = await self.redis.sismember(recent_key, message_hash)
+            if is_member:
                 logger.info(f"[NotifyDispatcher] Found duplicate notification for {notification.user} on {notification.channel}: {notification.message[:50]}...")
                 return True
                 
             # Add this message to recent messages
-            await self.redis.lpush(recent_key, message_hash)
-            # Trim list to keep only last N messages
-            await self.redis.ltrim(recent_key, 0, self.dedup_max_messages - 1)
-            # Set expiry on the list
+            await self.redis.sadd(recent_key, message_hash)
+            
+            # Set expiry on the set
             await self.redis.expire(recent_key, self.dedup_window)
             
-            logger.info(f"[NotifyDispatcher] Added new notification to recent list for {notification.user} on {notification.channel}")
+            # If set is too large, remove oldest entries
+            set_size = await self.redis.scard(recent_key)
+            if set_size > self.dedup_max_messages:
+                # Remove random members to get back to max size
+                await self.redis.spop(recent_key, set_size - self.dedup_max_messages)
+            
+            logger.info(f"[NotifyDispatcher] Added new notification to recent set for {notification.user} on {notification.channel}")
             return False
             
         except Exception as e:
@@ -105,9 +110,9 @@ class NotifyDispatcher:
             
             # Use setex to set value with expiry in one command
             if not current:
-                await self.redis.set(key, "1", 60)  # 1 minute expiry
+                await self.redis.set(key, "1", ex=60)  # 1 minute expiry
             else:
-                await self.redis.set(key, str(int(current) + 1), 60)
+                await self.redis.set(key, str(int(current) + 1), ex=60)
             
             return True
         except Exception as e:
@@ -181,7 +186,7 @@ class NotifyDispatcher:
                     if success:
                         logger.info(f"[NotifyDispatcher] Notification sent via {notification.channel} to {notification.user}")
                         # Mark notification as sent
-                        await self.redis.set(status_key, "sent", self.dedup_window)
+                        await self.redis.set(status_key, "sent", ex=self.dedup_window)
                         await self.redis.publish(
                             "market_watch:notify_sent",
                             json.dumps({

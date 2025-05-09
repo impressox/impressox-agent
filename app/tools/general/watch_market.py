@@ -93,11 +93,7 @@ async def _watch_market_async(tokens: Optional[List[str]] = None, conditions: Op
     conversation_id = runable_config["configurable"].get("conversation_id", None)
 
     if not tokens:
-        tokens = ["BTC", "ETH", "BNB", "SOL", "XRP"]
-        return {
-            "success": True,
-            "message": f"Mặc định tôi sẽ theo dõi các token này: {', '.join(tokens)}"
-        }
+        tokens = []  # Set empty list to continue processing
 
     # Verify tokens on CoinGecko
     valid_tokens = []
@@ -107,50 +103,51 @@ async def _watch_market_async(tokens: Optional[List[str]] = None, conditions: Op
     coingecko_api_key = app_configs.API_CONF["coingecko"]["api_key"]
     headers = {"x-cg-demo-api-key": coingecko_api_key} if coingecko_api_key else {}
     
-    for token in tokens:
-        # Search for the token
-        search_url = f"/search?query={token}"
-        search_result = await call_api(
-            f"{coingecko_url}{search_url}", 
-            method="GET",
-            headers=headers
-        )
-        
-        if search_result["success"] and "coins" in search_result["data"] and search_result["data"]["coins"]:
-            coin_data = search_result["data"]["coins"][0]
-            # Check if the found token exactly matches user input
-            exact_match = (
-                coin_data["symbol"].upper() == token.upper() or 
-                coin_data["name"].lower() == token.lower()
+    if tokens and len(tokens) > 0:
+        for token in tokens:
+            # Search for the token
+            search_url = f"/search?query={token}"
+            search_result = await call_api(
+                f"{coingecko_url}{search_url}", 
+                method="GET",
+                headers=headers
             )
             
-            if not exact_match:
-                return {
-                    "success": True,
-                    "message": f"Tôi tìm thấy token '{coin_data['name']} ({coin_data['symbol']})' cho từ khóa '{token}'. Bạn có muốn theo dõi token này không?",
-                    "confirm": {
-                        "token": token,
-                        "found_token": {
-                            "symbol": coin_data["symbol"].upper(),
-                            "id": coin_data["id"],
-                            "name": coin_data["name"]
+            if search_result["success"] and "coins" in search_result["data"] and search_result["data"]["coins"]:
+                coin_data = search_result["data"]["coins"][0]
+                # Check if the found token exactly matches user input
+                exact_match = (
+                    coin_data["symbol"].upper() == token.upper() or 
+                    coin_data["name"].lower() == token.lower()
+                )
+                
+                if not exact_match:
+                    return {
+                        "success": True,
+                        "message": f"Tôi tìm thấy token '{coin_data['name']} ({coin_data['symbol']})' cho từ khóa '{token}'. Bạn có muốn theo dõi token này không?",
+                        "confirm": {
+                            "token": token,
+                            "found_token": {
+                                "symbol": coin_data["symbol"].upper(),
+                                "id": coin_data["id"],
+                                "name": coin_data["name"]
+                            }
                         }
                     }
-                }
-            
-            valid_tokens.append({
-                "symbol": coin_data["symbol"].upper(),
-                "id": coin_data["id"],
-                "name": coin_data["name"]
-            })
-        else:
-            invalid_tokens.append(token)
+                
+                valid_tokens.append({
+                    "symbol": coin_data["symbol"].upper(),
+                    "id": coin_data["id"],
+                    "name": coin_data["name"]
+                })
+            else:
+                invalid_tokens.append(token)
 
-    if not valid_tokens:
-        return {
-            "success": False,
-            "message": f"Không tìm thấy tokens: {', '.join(tokens)}"
-        }
+        if not valid_tokens:
+            return {
+                "success": False,
+                "message": f"Không tìm thấy tokens: {', '.join(tokens)}"
+            }
 
     # Create watch rule
     rule = {
@@ -158,21 +155,28 @@ async def _watch_market_async(tokens: Optional[List[str]] = None, conditions: Op
         "user_id": str(user_id),  # Convert to string to avoid ObjectId
         "user_name": user_name,
         "watch_type": "token",
-        "target": [t["symbol"] for t in valid_tokens],
+        "target": tokens if tokens else ["*"],  # Use "*" as a special token for watching all
         "target_data": {
             t["symbol"]: {
                 "symbol": t["symbol"],
                 "name": t["name"],
                 "coin_gc_id": t["id"]  # Add CoinGecko ID
             } for t in valid_tokens
-        },  # Store additional token data with CoinGecko IDs
+        } if tokens else {
+            "*": {
+                "symbol": "*",
+                "name": "All Tokens",
+                "coin_gc_id": "*"
+            }
+        },
         "condition": conditions or {"type": "any"},
         "notify_channel": app,
         "notify_id": get_notify_id(user_id, app, conversation_id, runable_config["configurable"].get("chat_type")),
         "metadata": {
             "conversation_id": conversation_id,
             "chat_type": runable_config["configurable"].get("chat_type"),
-            "created_at": time.time()
+            "created_at": time.time(),
+            "watch_price": bool(tokens)  # Flag to indicate if we should watch price
         },
         "active": True
     }
@@ -218,11 +222,15 @@ async def _watch_market_async(tokens: Optional[List[str]] = None, conditions: Op
             "message": f"Lỗi kết nối Redis: {str(e)}"
         }
 
-    msg = f"Đã đăng ký theo dõi: {', '.join(f'{t['symbol']} ({t['name']})' for t in valid_tokens)} qua {app}."
-    if conditions:
-        msg += f"\nĐiều kiện: {json.dumps(conditions, ensure_ascii=False)}"
-    if invalid_tokens:
-        msg += f"\nKhông tìm thấy: {', '.join(invalid_tokens)}"
+    msg = "Đã đăng ký theo dõi"
+    if tokens:
+        msg += f": {', '.join(f'{t['symbol']} ({t['name']})' for t in valid_tokens)}"
+        if conditions:
+            msg += f"\nĐiều kiện: {json.dumps(conditions, ensure_ascii=False)}"
+        if invalid_tokens:
+            msg += f"\nKhông tìm thấy: {', '.join(invalid_tokens)}"
+    else:
+        msg += " tất cả các biến động trên thị trường"
 
     return {
         "success": True,

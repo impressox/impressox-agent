@@ -245,7 +245,7 @@ async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 I can help with DeFi, NFTs, wallets, and more.
 
 To chat with me in this group:
-1. Mention me using @{bot.username}
+1. Mention me using `@{bot.username}`
 2. Type your question
 
 For private chat, just DM me directly!
@@ -308,7 +308,7 @@ async def handle_chat_member_update(update: Update, context: ContextTypes.DEFAUL
 I can help with DeFi, NFTs, wallets, and more.
 
 To chat with me in this group:
-1. Mention me using @{bot.username}
+1. Mention me using `@{bot.username}`
 2. Type your question
 
 For private chat, just DM me directly!

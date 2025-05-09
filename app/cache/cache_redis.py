@@ -123,6 +123,15 @@ class RedisClient:
             print(f"Error getting all hash fields from {name}: {e}")
             return {}
 
+    def hdel(self, name: str, key: str) -> bool:
+        """Delete hash field"""
+        try:
+            name = self.cache_key_prefix + name
+            return bool(self.redis.hdel(name, key))
+        except Exception as e:
+            print(f"Error deleting hash field {key} from {name}: {e}")
+            return False
+
     def push_to_queue(self, queue_name: str, value: Any) -> bool:
         """Push value to list (Queue)"""
         try:

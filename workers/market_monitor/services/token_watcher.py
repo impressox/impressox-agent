@@ -88,6 +88,7 @@ class TokenWatcher(BaseWatcher):
             
             # Get target_data from active rules
             target_data = {}
+            watch_price_rules = set()  # Track which rules need price watching
             for token in self.watching_targets:
                 try:
                     rules = await self.redis.hgetall(f"watch:active:token:{token}")
@@ -102,6 +103,9 @@ class TokenWatcher(BaseWatcher):
                             rule = Rule.from_dict(rule_dict)
                             if rule.target_data:
                                 target_data.update(rule.target_data)
+                            # Check if this rule needs price watching
+                            if rule.metadata and rule.metadata.get("watch_price", True):
+                                watch_price_rules.add(rule_id)
                             break  # Only need data from one rule
                         except (json.JSONDecodeError, UnicodeDecodeError) as e:
                             logger.error(f"[TokenWatcher] Error decoding rule JSON for token {token}, rule {rule_id}: {e}")
@@ -110,13 +114,14 @@ class TokenWatcher(BaseWatcher):
                     logger.error(f"[TokenWatcher] Error getting rules for token {token}: {e}")
                     continue
 
-            # Get token data from CoinGecko using coin_gc_id
-            token_data = await self.get_token_data(list(self.watching_targets), target_data)
-            if not token_data:
-                logger.warning("[TokenWatcher] No token data received from API")
-                token_data = {}  # Set empty dict instead of returning
-
-            logger.info(f"[TokenWatcher] Received token data: {self._serialize_to_json(token_data)}")
+            # Get token data from CoinGecko only if there are rules that need price watching
+            token_data = {}
+            if watch_price_rules:
+                token_data = await self.get_token_data(list(self.watching_targets), target_data)
+                if not token_data:
+                    logger.warning("[TokenWatcher] No token data received from API")
+                else:
+                    logger.info(f"[TokenWatcher] Received token data: {self._serialize_to_json(token_data)}")
 
             # Get alert data using original symbols
             alert_matches = await self.get_alert_data()
@@ -349,7 +354,8 @@ class TokenWatcher(BaseWatcher):
                 matches.append({
                     "token": token,
                     "condition": "price_change_24h",
-                    "value": change_24h
+                    "value": change_24h,
+                    "current_price": price
                 })
 
         if matches:

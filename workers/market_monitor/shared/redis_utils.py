@@ -235,6 +235,27 @@ class RedisClient:
             logger.error(f"Error checking set membership {key}: {e}")
             return False
         
+    async def scard(self, key: str) -> int:
+        """Get the number of members in a set"""
+        if not self._redis:
+            await self.connect()
+        try:
+            return await self._redis.scard(key)
+        except RedisError as e:
+            logger.error(f"Error getting set cardinality for {key}: {e}")
+            return 0
+        
+    async def spop(self, key: str, count: int = 1) -> List[str]:
+        """Remove and return random members from a set"""
+        if not self._redis:
+            await self.connect()
+        try:
+            result = await self._redis.spop(key, count)
+            return [r.decode() if isinstance(r, bytes) else r for r in result]
+        except RedisError as e:
+            logger.error(f"Error popping members from set {key}: {e}")
+            return []
+        
     async def hset(self, key: str, field: str, value: Any):
         """Set hash field"""
         if not self._redis:
