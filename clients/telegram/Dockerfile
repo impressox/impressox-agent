@@ -7,7 +7,10 @@ WORKDIR /app
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app
+    PYTHONPATH=/app \
+    PYTHONIOENCODING=utf-8 \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -22,7 +25,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy only necessary files for Telegram bot
-COPY . /app/clients/telegram/
+COPY . /app/
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && \

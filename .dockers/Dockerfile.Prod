@@ -17,8 +17,7 @@ RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy source
-COPY src /app/src
-COPY settings /app/configs
+COPY src /app/app
 
 # Non-root user for security
 RUN groupadd -r appuser && useradd --no-log-init -r -g appuser appuser && \
@@ -29,4 +28,4 @@ ENV PYTHONPATH=/app
 ENV LANGCHAIN_TRACING_V2=false
 
 # Recommended for FastAPI apps
-CMD ["uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "9999"]

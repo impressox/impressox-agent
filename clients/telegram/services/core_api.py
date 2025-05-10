@@ -1,6 +1,4 @@
 # services/core_api.py
-
-import requests
 from clients.config import CORE_API_URL, TIMEOUT, STREAM_TIMEOUT
 import aiohttp
 import httpx
