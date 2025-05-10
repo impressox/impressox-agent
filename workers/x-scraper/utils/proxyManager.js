@@ -39,6 +39,7 @@ function saveProxyToFile(proxyUrl, expiresAt) {
 }
 
 export async function getRotatingProxy(retryCount = 0, maxRetry = 3) {
+  return "http://1234568:1234568@1.54.234.249:23270";
   const now = Date.now() / 1000;
 
   // Lần đầu khởi động, load từ file nếu chưa có

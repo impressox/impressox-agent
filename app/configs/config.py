@@ -52,6 +52,7 @@ class GlobalConfig(BaseSettings):
     MYSQL_URL: Optional[str] = Field(None, env="MYSQL_URL")
     ELK_URL: Optional[str] = Field(None, env="ELK_URL")
     LLM_URL: Optional[str] = Field(None, env="LLM_URL")
+    VECTOR_STORE_URL: Optional[str] = Field(None, env="VECTOR_STORE_URL")
     
     # Config files for production
     API_CONF: Dict[str, Any] = ConfigReaderInstance.yaml.read_config_from_file("configs/api.yaml")
@@ -61,6 +62,7 @@ class GlobalConfig(BaseSettings):
     REDIS_CONF: Dict[str, Any] = ConfigReaderInstance.yaml.read_config_from_file("configs/redis.yaml")
     LANGFUSE_CONF: Dict[str, Any] = ConfigReaderInstance.yaml.read_config_from_file("configs/langfuse.yaml")
     MYSQL_CONF: Dict[str, Any] = ConfigReaderInstance.yaml.read_config_from_file("configs/mysql.yaml")
+    VECTOR_STORE_CONF: Dict[str, Any] = ConfigReaderInstance.yaml.read_config_from_file("configs/vector_store.yaml")
 
     class Config:
         """Loads the dotenv file."""
@@ -108,6 +110,13 @@ class GlobalConfig(BaseSettings):
         if self.LLM_URL:
             return {"url": self.LLM_URL}
         return self.LLM_CONF
+
+    def get_vector_store_config(self) -> Dict[str, Any]:
+        """Get Vector Store configuration.
+        Returns URL config in dev mode, file config in prod mode."""
+        if self.VECTOR_STORE_URL:
+            return {"connection": {"url": self.VECTOR_STORE_URL}}
+        return self.VECTOR_STORE_CONF
 
 class DevConfig(GlobalConfig):
     """Development configurations."""

@@ -35,35 +35,44 @@ async function fetchTweets(scraper, username, userId, limit = 200) {
     let page = null;
 
     while (true) {
-        console.log(`🔄 [${username}] Fetching tweets...`);
-        const proxyUrl = await getRotatingProxy();
-        setGlobalDispatcher(new ProxyAgent(proxyUrl));
-        page = await scraper.getUserTweets(userId, 100, page?.next);
-        console.log(`🌐 [${username}] Fetched ${page?.tweets?.length || 0} tweets`);
-        if (!page?.tweets?.length) break;
+        try {
+            console.log(`🔄 [${username}] Fetching tweets...`);
+            const proxyUrl = await getRotatingProxy();
+            if (proxyUrl) {
+                setGlobalDispatcher(new ProxyAgent(proxyUrl));
+                console.log(`🌐 [${username}] Using proxy ${proxyUrl} for ${username}`);
+            }
+            page = await scraper.getUserTweets(userId, 100, page?.next);
+            console.log(`🌐 [${username}] Fetched ${page?.tweets?.length || 0} tweets`);
+            if (!page?.tweets?.length) break;
 
-        for (const tweet of page.tweets) {
-            if (!tweet.id) continue;
+            for (const tweet of page.tweets) {
+                if (!tweet.id) continue;
 
-            const tweetData = {
-                user: tweet.username || username,
-                post_id: tweet.id,
-                post_link: tweet.permanentUrl || `https://x.com/${tweet.username}/status/${tweet.id}`,
-                text: tweet.text,
-                post_time: tweet.timeParsed || (tweet.timestamp ? new Date(tweet.timestamp * 1000) : null),
-                likes: tweet.likes || 0,
-                total_comments: tweet.replies || 0,
-                reposts: tweet.retweets || 0,
-                quotes: tweet.quotedStatusId ? 1 : 0,
-                comments: []  // will be populated in later enhancement
-            };
+                const tweetData = {
+                    user: tweet.username || username,
+                    post_id: tweet.id,
+                    post_link: tweet.permanentUrl || `https://x.com/${tweet.username}/status/${tweet.id}`,
+                    text: tweet.text,
+                    post_time: tweet.timeParsed || (tweet.timestamp ? new Date(tweet.timestamp * 1000) : null),
+                    likes: tweet.likes || 0,
+                    total_comments: tweet.replies || 0,
+                    reposts: tweet.retweets || 0,
+                    quotes: tweet.quotedStatusId ? 1 : 0,
+                    comments: []  // will be populated in later enhancement
+                };
 
-            tweets.push(tweetData);
-            console.log(`📝 [${username}] Fetched tweet ${tweet.id} (${tweets.length}/${limit})`);
-            if (tweets.length >= limit) break;
+                tweets.push(tweetData);
+                console.log(`📝 [${username}] Fetched tweet ${tweet.id} (${tweets.length}/${limit})`);
+                if (tweets.length >= limit) break;
+            }
+
+            if (!page.next || tweets.length >= limit) break;
+        } catch (err) {
+            console.error(`❌ [${username}] Error fetching tweets: ${err.message}`);
+            console.log(`⏳ Waiting 10s before retrying ${username}...`);
+            await new Promise(r => setTimeout(r, 10000));
         }
-
-        if (!page.next || tweets.length >= limit) break;
     }
 
     return tweets;
@@ -71,7 +80,7 @@ async function fetchTweets(scraper, username, userId, limit = 200) {
 
 // One crawl loop (all accounts, all users)
 
-const USER_CONCURRENCY = 3;
+const USER_CONCURRENCY = 1;
 
 async function runCrawl() {
     console.log(`\n⏱️ [${new Date().toLocaleString()}] Starting crawl...`);
@@ -82,7 +91,9 @@ async function runCrawl() {
 
         try {
             const proxyUrl = await getRotatingProxy();
-            setGlobalDispatcher(new ProxyAgent(proxyUrl));
+            if (proxyUrl) {
+                setGlobalDispatcher(new ProxyAgent(proxyUrl));
+            }
             const scraper = await initScraperWithCookies(account);
             const limit = pLimit(USER_CONCURRENCY);
 
@@ -93,10 +104,12 @@ async function runCrawl() {
                     while (retry < maxRetries) {
                         try {
                             const proxyUrl = await getRotatingProxy();
-                            setGlobalDispatcher(new ProxyAgent(proxyUrl));
-                            console.log(`🌐 [${account.username}] Using proxy ${proxyUrl} for ${username}`);
+                            if (proxyUrl) {
+                                setGlobalDispatcher(new ProxyAgent(proxyUrl));
+                            }
 
                             const userId = await scraper.getUserIdByScreenName(username);
+                            console.log(`🔄 [${username}] User ID: ${userId}`);
                             const tweets = await fetchTweets(scraper, username, userId);
                             await saveTweets(tweets, username);
                             console.log(`✅ [${account.username}] Saved ${tweets.length} tweets from ${username}`);

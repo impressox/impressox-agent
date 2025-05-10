@@ -270,8 +270,19 @@ class TokenWatcher(BaseWatcher):
             # Check if this alert is for any of our target tokens
             is_target_alert = False
             for token in rule.target:
-                # Check if token is mentioned in the alert message
-                if token.lower() in alert["message"].lower():
+                # For wildcard token (*), match all alerts
+                if token == "*":
+                    is_target_alert = True
+                    logger.info(f"[TokenWatcher] Wildcard token match found for alert: {alert['message']}")
+                    matches.append({
+                        "token": alert_data.get("crypto", "Unknown"),  # Use crypto from alert data
+                        "condition": "alert",
+                        "message": alert["message"],
+                        "data": alert_data
+                    })
+                    break
+                # For specific tokens, check if token is mentioned in the alert message
+                elif token.lower() in alert["message"].lower():
                     is_target_alert = True
                     logger.info(f"[TokenWatcher] Alert match found for token {token}: {alert['message']}")
                     matches.append({
@@ -303,6 +314,9 @@ class TokenWatcher(BaseWatcher):
 
         # Then check price conditions
         for token in rule.target:
+            if token == "*":  # Skip price checks for wildcard token
+                continue
+                
             if token not in token_data:
                 logger.warning(f"[TokenWatcher] Token {token} not found in token data")
                 continue

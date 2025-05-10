@@ -1,73 +1,111 @@
 from datetime import datetime
 from typing import List, Dict, Optional
-import tweepy
-from ..common.chunker import SemanticChunker
-from ..common.vector_store import VectorStore
+import os
+import logging
+from dotenv import load_dotenv
+from pymongo import MongoClient
+from workers.rag_processor.common.chunker import SemanticChunker
+from workers.rag_processor.common.vector_store import VectorStore
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+# Load environment variables from .env file
+load_dotenv()
 
 class TwitterProcessor:
-    def __init__(self, api_key: str, api_secret: str, access_token: str, access_token_secret: str):
-        """Initialize Twitter API client"""
-        auth = tweepy.OAuthHandler(api_key, api_secret)
-        auth.set_access_token(access_token, access_token_secret)
-        self.api = tweepy.API(auth)
-        self.chunker = SemanticChunker()
+    def __init__(self, mongo_uri: str = None, db_name: str = None):
+        """Initialize Twitter processor with MongoDB connection"""
+        self.client = MongoClient(mongo_uri or os.getenv('TWITTER_MONGODB_URI', 'mongodb://localhost:27017'))
+        self.db = self.client[db_name or os.getenv('TWITTER_MONGODB_DB_NAME', 'cpx-data')]
+        self.tweets_collection = self.db["tweets"]
+        self.chunker = SemanticChunker(language='en')
         self.vector_store = VectorStore()
+        logger.info("TwitterProcessor initialized")
 
-    def _get_tweet_text(self, tweet) -> str:
-        """Extract full text from tweet"""
-        if hasattr(tweet, 'full_text'):
-            return tweet.full_text
-        return tweet.text
-
-    def _process_tweet(self, tweet) -> Dict:
-        """Process a single tweet into chunks with metadata"""
-        text = self._get_tweet_text(tweet)
-        
-        metadata = {
-            "source": "twitter",
-            "post_id": str(tweet.id),
-            "sender": tweet.user.screen_name,
-            "timestamp": tweet.created_at.isoformat(),
-            "chat_type": "tweet",
-            "retweet_count": tweet.retweet_count,
-            "favorite_count": tweet.favorite_count
-        }
-
-        return self.chunker.chunk_with_metadata(text, metadata)
-
-    def process_tweets(self, last_run: Optional[str] = None) -> bool:
-        """Process new tweets since last run"""
+    def _get_safe_timestamp(self, tweet: Dict) -> str:
+        """Get safe timestamp from tweet"""
         try:
-            # Get timeline tweets
-            tweets = self.api.home_timeline(
-                count=100,
-                tweet_mode='extended',
-                since_id=last_run if last_run else None
-            )
+            post_time = tweet.get("post_time")
+            if post_time is None:
+                logger.warning(f"Tweet {tweet.get('post_id', 'unknown')} has no post_time, using current time")
+                return datetime.now().isoformat()
+            return post_time.isoformat()
+        except Exception as e:
+            logger.warning(f"Error getting timestamp for tweet {tweet.get('post_id', 'unknown')}: {str(e)}")
+            return datetime.now().isoformat()
+
+    def _get_safe_value(self, value: any, default: any = '') -> any:
+        """Get safe value from tweet field"""
+        return value if value is not None else default
+
+    def _process_tweet(self, tweet: Dict) -> List[Dict]:
+        """Process a single tweet into chunks with metadata"""
+        try:
+            # Get text with fallback
+            text = self._get_safe_value(tweet.get("text", ""))
+            if not text:
+                logger.warning(f"Skipping tweet {tweet.get('post_id', 'unknown')} - empty text")
+                return []
+            
+            metadata = {
+                "source": "twitter",
+                "post_id": str(self._get_safe_value(tweet.get("post_id", ""))),
+                "sender": self._get_safe_value(tweet.get("user", "")),
+                "timestamp": self._get_safe_timestamp(tweet),
+                "chat_type": "tweet",
+                "retweet_count": int(self._get_safe_value(tweet.get("reposts", 0))),
+                "favorite_count": int(self._get_safe_value(tweet.get("likes", 0)))
+            }
+
+            chunks = self.chunker.chunk_with_metadata(text, metadata)
+            logger.debug(f"Processed tweet {tweet.get('post_id', 'unknown')} into {len(chunks)} chunks")
+            return chunks
+        except Exception as e:
+            logger.error(f"Error processing tweet {tweet.get('post_id', 'unknown')}: {str(e)}")
+            return []
+
+    def process_tweets(self, last_run_time: Optional[str] = None) -> bool:
+        """Process tweets since last run time"""
+        try:
+            # Build query based on last run time
+            query = {}
+            if last_run_time:
+                last_run = datetime.fromisoformat(last_run_time)
+                query["post_time"] = {"$gt": last_run}
+                logger.info(f"Querying tweets after {last_run_time}")
+            else:
+                logger.info("Processing all available tweets")
+
+            # Get tweets from MongoDB
+            tweets = list(self.tweets_collection.find(query).sort("post_time", 1))
+            logger.info(f"Found {len(tweets)} tweets to process")
 
             if not tweets:
+                logger.info("No new tweets to process")
                 return False
 
             # Process each tweet
+            processed_count = 0
             for tweet in tweets:
                 chunks = self._process_tweet(tweet)
                 if chunks:
                     self.vector_store.add_documents(chunks)
+                    processed_count += 1
 
+            logger.info(f"Successfully processed {processed_count} tweets")
             return True
 
         except Exception as e:
-            print(f"Error processing tweets: {str(e)}")
+            logger.error(f"Error processing tweets: {str(e)}", exc_info=True)
             return False
 
-def process_twitter_data(last_run: Optional[str] = None) -> bool:
-    """Process Twitter data and return True if new data was processed"""
-    # Initialize processor with Twitter API credentials
-    processor = TwitterProcessor(
-        api_key="YOUR_API_KEY",
-        api_secret="YOUR_API_SECRET",
-        access_token="YOUR_ACCESS_TOKEN",
-        access_token_secret="YOUR_ACCESS_TOKEN_SECRET"
-    )
-    
-    return processor.process_tweets(last_run) 
+def process_twitter_data(last_run_time: Optional[str] = None) -> bool:
+    """Process Twitter data since last run time and return True if data was processed"""
+    try:
+        # Initialize processor with MongoDB connection details from environment variables
+        processor = TwitterProcessor()
+        return processor.process_tweets(last_run_time)
+    except Exception as e:
+        logger.error(f"Error in process_twitter_data: {str(e)}", exc_info=True)
+        return False 

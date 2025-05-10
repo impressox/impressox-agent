@@ -79,3 +79,8 @@ workers/*/accounts/*.txt
 docker-compose.yml
 
 user_list.txt
+chroma_export.json
+chroma_db/
+workers/twitter_scraper/config
+proxy.txt
+last_run.json
