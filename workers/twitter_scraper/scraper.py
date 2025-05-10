@@ -399,7 +399,7 @@ class TwitterScraper:
                         tweet_data = {
                             'user': username,
                             'post_id': tweet.id,
-                            'post_link': f"https://twitter.com/{username}/status/{tweet.id}",
+                            'post_link': f"https://x.com/{username}/status/{tweet.id}",
                             'text': tweet.rawContent,
                             'post_time': tweet.date,
                             'likes': tweet.likeCount,

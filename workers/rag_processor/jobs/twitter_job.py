@@ -40,7 +40,7 @@ class TwitterProcessor:
         return value if value is not None else default
 
     def _process_tweet(self, tweet: Dict) -> List[Dict]:
-        """Process a single tweet into chunks with metadata"""
+        """Process a single tweet into vector store document"""
         try:
             # Get text with fallback
             text = self._get_safe_value(tweet.get("text", ""))
@@ -55,12 +55,21 @@ class TwitterProcessor:
                 "timestamp": self._get_safe_timestamp(tweet),
                 "chat_type": "tweet",
                 "retweet_count": int(self._get_safe_value(tweet.get("reposts", 0))),
-                "favorite_count": int(self._get_safe_value(tweet.get("likes", 0)))
+                "favorite_count": int(self._get_safe_value(tweet.get("likes", 0))),
+                "original_text": text  # Store original text in metadata
             }
 
-            chunks = self.chunker.chunk_with_metadata(text, metadata)
-            logger.debug(f"Processed tweet {tweet.get('post_id', 'unknown')} into {len(chunks)} chunks")
-            return chunks
+            # Check text length and chunk if needed
+            MAX_TEXT_LENGTH = 10000  # Adjust this threshold as needed
+            if len(text) > MAX_TEXT_LENGTH:
+                logger.info(f"Text length {len(text)} exceeds {MAX_TEXT_LENGTH}, chunking...")
+                return self.chunker.chunk_with_metadata(text, metadata)
+            
+            # Return single document for short texts
+            return [{
+                "text": text,
+                "metadata": metadata
+            }]
         except Exception as e:
             logger.error(f"Error processing tweet {tweet.get('post_id', 'unknown')}: {str(e)}")
             return []

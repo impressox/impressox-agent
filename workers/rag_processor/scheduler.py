@@ -22,7 +22,27 @@ logger = logging.getLogger(__name__)
 class RAGProcessorScheduler:
     def __init__(self):
         self.scheduler = BackgroundScheduler()
-        self.last_run_file = Path(__file__).parent / "last_run.json"
+        
+        # Check each level for rag_configs directory
+        current_path = Path(__file__).parent
+        rag_configs_dir = None
+        
+        # Check current directory and parent directories
+        while current_path != current_path.parent:  # Stop at root
+            config_dir = current_path / "rag_configs"
+            if config_dir.exists():
+                rag_configs_dir = config_dir
+                logger.info(f"Found rag_configs directory at: {rag_configs_dir}")
+                break
+            current_path = current_path.parent
+        
+        # If not found, create in the project root
+        if rag_configs_dir is None:
+            rag_configs_dir = Path(__file__).parent.parent.parent / "rag_configs"
+            rag_configs_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Created rag_configs directory at: {rag_configs_dir}")
+        
+        self.last_run_file = rag_configs_dir / "last_run.json"
         self._load_last_run()
         self._setup_signal_handlers()
         self.is_running = False

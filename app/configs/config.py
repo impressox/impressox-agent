@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from typing import Optional, Dict, List, Any
+import yaml
 
 from pydantic import Field, BaseModel
 from pydantic_settings import BaseSettings
@@ -63,6 +64,7 @@ class GlobalConfig(BaseSettings):
     LANGFUSE_CONF: Dict[str, Any] = ConfigReaderInstance.yaml.read_config_from_file("configs/langfuse.yaml")
     MYSQL_CONF: Dict[str, Any] = ConfigReaderInstance.yaml.read_config_from_file("configs/mysql.yaml")
     VECTOR_STORE_CONF: Dict[str, Any] = ConfigReaderInstance.yaml.read_config_from_file("configs/vector_store.yaml")
+    EMBEDDER_CONF: Dict[str, Any] = ConfigReaderInstance.yaml.read_config_from_file("configs/embedder.yaml")
 
     class Config:
         """Loads the dotenv file."""
@@ -117,6 +119,10 @@ class GlobalConfig(BaseSettings):
         if self.VECTOR_STORE_URL:
             return {"connection": {"url": self.VECTOR_STORE_URL}}
         return self.VECTOR_STORE_CONF
+
+    def get_embedder_config(self) -> Dict[str, Any]:
+        """Get embedder configuration."""
+        return self.EMBEDDER_CONF
 
 class DevConfig(GlobalConfig):
     """Development configurations."""

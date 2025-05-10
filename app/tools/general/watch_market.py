@@ -19,22 +19,6 @@ from langchain_core.runnables import RunnableConfig
 
 logger = logging.getLogger(__name__)
 
-# Global event loop for database operations
-_db_loop = None
-
-def get_db_loop():
-    """Get or create database event loop"""
-    global _db_loop
-    if _db_loop is None or _db_loop.is_closed():
-        _db_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(_db_loop)
-    return _db_loop
-
-def run_async(coro):
-    """Run coroutine in database event loop"""
-    loop = get_db_loop()
-    return loop.run_until_complete(coro)
-
 class MongoJSONEncoder(json.JSONEncoder):
     """Custom JSON encoder for MongoDB objects"""
     def default(self, obj):
@@ -60,7 +44,7 @@ def get_notify_id(user_id: str, app: str, conversation_id: str = None, chat_type
 
 @register_tool(NodeName.GENERAL_NODE, "watch_market")
 @tool
-def watch_market(tokens: Optional[List[str]] = None, conditions: Optional[Dict] = None, runable_config: RunnableConfig = None) -> Dict[str, Any]:
+async def watch_market(tokens: Optional[List[str]] = None, conditions: Optional[Dict] = None, runable_config: RunnableConfig = None) -> Dict[str, Any]:
     """
     Tool để đăng ký theo dõi biến động của một hoặc nhiều token (ví dụ: giá, volume, tin tức, sự kiện). 
     Khi có thay đổi liên quan đến các token này, hệ thống sẽ chủ động thông báo cho bạn qua kênh đã kết nối (Telegram, Web, Discord).
@@ -74,7 +58,7 @@ def watch_market(tokens: Optional[List[str]] = None, conditions: Optional[Dict] 
         Dict với trạng thái và thông báo kết quả đăng ký theo dõi.
     """
     try:
-        return run_async(_watch_market_async(tokens, conditions, runable_config))
+        return await _watch_market_async(tokens, conditions, runable_config)
     except Exception as e:
         logger.error(f"[WatchMarket] Error: {e}", exc_info=True)
         return {

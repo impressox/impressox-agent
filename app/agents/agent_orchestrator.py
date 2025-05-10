@@ -29,7 +29,7 @@ def agent_orchestrator_node(state: AgentState, config: RunnableConfig):
     return Command(goto=goto, update={"next": goto, "current": goto})
 
 
-def generic_node(state: AgentState, node_name: str, config: RunnableConfig):
+async def generic_node(state: AgentState, node_name: str, config: RunnableConfig):
     """
     Node xử lý chung cho các agent tùy theo node_name.
 
@@ -53,7 +53,7 @@ def generic_node(state: AgentState, node_name: str, config: RunnableConfig):
     if not graph:
         raise RuntimeError(f"Graph not found for node {node_name}")
 
-    results = graph.invoke(node_state)
+    results = await graph.ainvoke(node_state)
     new_messages = results["messages"][len(node_state["messages"]):]
 
     # Cập nhật state

@@ -18,21 +18,6 @@ from langchain_core.runnables import RunnableConfig
 
 logger = logging.getLogger(__name__)
 
-# Global event loop for database operations
-_db_loop = None
-
-def get_db_loop():
-    """Get or create database event loop"""
-    global _db_loop
-    if _db_loop is None or _db_loop.is_closed():
-        _db_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(_db_loop)
-    return _db_loop
-
-def run_async(coro):
-    """Run coroutine in database event loop"""
-    loop = get_db_loop()
-    return loop.run_until_complete(coro)
 
 class MongoJSONEncoder(json.JSONEncoder):
     """Custom JSON encoder for MongoDB objects"""
@@ -71,7 +56,7 @@ async def verify_token_with_coingecko(token: str) -> Optional[Dict]:
 
 @register_tool(NodeName.GENERAL_NODE, "unwatch_market")
 @tool
-def unwatch_market(tokens: Optional[List[str]] = None, runable_config: RunnableConfig = None) -> Dict[str, Any]:
+async def unwatch_market(tokens: Optional[List[str]] = None, runable_config: RunnableConfig = None) -> Dict[str, Any]:
     """
     Tool để hủy theo dõi biến động của một hoặc nhiều token đang được theo dõi.
     Có thể hủy theo dõi một token cụ thể, một số token, hoặc tất cả các token đang theo dõi.
@@ -83,7 +68,7 @@ def unwatch_market(tokens: Optional[List[str]] = None, runable_config: RunnableC
         Dict với trạng thái và thông báo kết quả hủy theo dõi.
     """
     try:
-        return run_async(_unwatch_market_async(tokens, runable_config))
+        return await _unwatch_market_async(tokens, runable_config)
     except Exception as e:
         logger.error(f"[UnwatchMarket] Error: {e}", exc_info=True)
         return {
@@ -99,12 +84,13 @@ async def _unwatch_market_async(tokens: Optional[List[str]] = None, runable_conf
     user_id = runable_config["configurable"].get("user_id", "")
     app = runable_config["configurable"].get("app", None)
     conversation_id = runable_config["configurable"].get("conversation_id", None)
+    chat_type = runable_config["configurable"].get("chat_type", "private")
 
     try:
         # Get all active rules for this user
         storage = await RuleStorage.get_instance()
-        active_rules = await storage.get_active_rules(user_id, "token")
-        
+        active_rules = await storage.get_active_rules(user_id, "token", conversation_id, chat_type)
+        logger.info(f"[UnwatchMarket] User {user_id} has {len(active_rules)} active rules")
         if not active_rules:
             return {
                 "success": True,

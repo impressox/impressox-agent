@@ -1,13 +1,22 @@
 import os
+import logging
+import uuid
+import numpy as np
 from typing import List, Dict, Optional
-from chromadb import Client, Settings
-from chromadb.config import Settings as ChromaSettings
+from qdrant_client import QdrantClient
+from qdrant_client.models import (
+    Distance, VectorParams, Filter, FieldCondition, MatchValue
+)
+from app.core.embedder import Embedder
 from app.configs.config import app_configs
+
+logger = logging.getLogger(__name__)
 
 class VectorStoreManager:
     _instance = None
     _client = None
-    _collection = None
+    _collection_name = None
+    _embedder = None
 
     def __new__(cls):
         if cls._instance is None:
@@ -16,69 +25,120 @@ class VectorStoreManager:
         return cls._instance
 
     def _initialize(self):
-        """Initialize ChromaDB client and collection."""
+        """Initialize Qdrant client and collection."""
         try:
-            # Get config from YAML
             config = app_configs.get_vector_store_config()
-            connection = config["connection"]
-            settings = config["settings"]
+            connection = config.get("connection", {})
+            settings = config.get("settings", {})
+            logger.info(f"Vector store config: {config}")
 
-            # Create persist directory if it doesn't exist
-            persist_dir = connection["persist_directory"]
-            os.makedirs(persist_dir, exist_ok=True)
+            host = connection.get("host", "localhost")
+            port = int(connection.get("port", 6333))
+            api_key = connection.get("api_key")  # Optional
 
-            # Initialize ChromaDB client with settings
-            self._client = Client(ChromaSettings(
-                anonymized_telemetry=settings["anonymized_telemetry"],
-                allow_reset=settings["allow_reset"],
-                is_persistent=settings["is_persistent"],
-                persist_directory=persist_dir
-            ))
+            self._collection_name = connection.get("collection_name", "rag_data")
 
-            # Get or create collection
-            self._collection = self._client.get_or_create_collection(
-                name=connection["collection_name"],
-                metadata={"hnsw:space": settings["hnsw"]["space"]},
-                hnsw_config=settings["hnsw"]
+            # Initialize embedder
+            self._embedder = Embedder()
+            embedding_dim = self._embedder.get_embedding_dimension()
+
+            self._client = QdrantClient(
+                url=f"http://{host}:{port}",
+                api_key=api_key
             )
 
+            # Create collection if it doesn't exist
+            if self._collection_name not in [c.name for c in self._client.get_collections().collections]:
+                self._client.recreate_collection(
+                    collection_name=self._collection_name,
+                    vectors_config=VectorParams(
+                        size=embedding_dim,
+                        distance=Distance.COSINE
+                    )
+                )
+
         except Exception as e:
-            print(f"Error initializing VectorStoreManager: {str(e)}")
+            logger.error(f"Error initializing VectorStoreManager: {str(e)}", exc_info=True)
             raise
 
     def search(self, query: str, n_results: int = 5, where: Optional[Dict] = None) -> List[Dict]:
-        """Search for similar documents."""
+        """Search for similar documents.
+        
+        Args:
+            query (str): The search query
+            n_results (int): Number of results to return
+            where (Dict, optional): Where conditions for filtering (e.g., {"source": "twitter"})
+        """
         try:
-            results = self._collection.query(
-                query_texts=[query],
-                n_results=n_results,
-                where=where
+            logger.info(f"Searching with query: {query}, n_results: {n_results}, where: {where}")
+            
+            # Generate query embedding using embedder
+            query_vector = self._embedder.embed_text(query)
+            query_vector = query_vector / np.linalg.norm(query_vector)
+            query_vector = query_vector.tolist()
+            
+            filter_query = None
+            if where:
+                filter_query = Filter(
+                    must=[
+                        FieldCondition(key=k, match=MatchValue(value=v))
+                        for k, v in where.items()
+                    ]
+                )
+
+            results = self._client.search(
+                collection_name=self._collection_name,
+                query_vector=query_vector,
+                limit=n_results,
+                query_filter=filter_query
             )
-            return results
+
+            formatted_results = []
+            for hit in results:
+                formatted_results.append({
+                    "text": hit.payload.get("text", ""),
+                    "metadata": hit.payload,
+                    "score": float(hit.score)
+                })
+
+            logger.info(f"Found {len(formatted_results)} results")
+            return formatted_results
+
         except Exception as e:
-            print(f"Error searching vector store: {str(e)}")
+            logger.error(f"Error searching vector store: {str(e)}", exc_info=True)
             return []
 
     def get_by_source(self, source: str, limit: int = 100) -> List[Dict]:
         """Get documents by source."""
         try:
-            results = self._collection.get(
-                where={"source": source},
-                limit=limit
+            results, _ = self._client.scroll(
+                collection_name=self._collection_name,
+                limit=limit,
+                filter=Filter(
+                    must=[FieldCondition(key="source", match=MatchValue(value=source))]
+                )
             )
-            return results
+
+            return [
+                {
+                    "text": point.payload.get("text", ""),
+                    "metadata": point.payload
+                }
+                for point in results
+            ]
         except Exception as e:
-            print(f"Error getting documents by source: {str(e)}")
+            logger.error(f"Error getting documents by source: {str(e)}", exc_info=True)
             return []
 
     def get_stats(self) -> Dict:
         """Get collection statistics."""
         try:
-            count = self._collection.count()
+            info = self._client.get_collection(collection_name=self._collection_name)
             return {
-                "total_documents": count,
-                "persist_directory": app_configs.get_vector_store_config()["connection"]["persist_directory"]
+                "total_documents": info.points_count,
+                "vector_size": info.config.params.vectors.size,
+                "distance": info.config.params.vectors.distance
             }
         except Exception as e:
-            print(f"Error getting collection stats: {str(e)}")
-            return {"total_documents": 0, "persist_directory": None} 
+            logger.error(f"Error getting collection stats: {str(e)}", exc_info=True)
+            return {"total_documents": 0, "error": str(e)}

@@ -55,12 +55,21 @@ class TelegramProcessor:
                 "message_type": self._get_safe_value(metadata.get('message_type')),
                 "is_reply": bool(metadata.get('is_reply', False)),
                 "reply_to_message_id": self._get_safe_value(metadata.get('reply_to_message_id')),
-                "reply_to_user_id": self._get_safe_value(metadata.get('reply_to_user_id'))
+                "reply_to_user_id": self._get_safe_value(metadata.get('reply_to_user_id')),
+                "original_text": text  # Store original text in metadata
             }
 
-            chunks = self.chunker.chunk_with_metadata(text, metadata_dict)
-            logger.debug(f"Processed message {message.get('_id', 'unknown')} into {len(chunks)} chunks")
-            return chunks
+            # Only chunk if text is longer than 10000 characters
+            MAX_TEXT_LENGTH = 10000
+            if len(text) > MAX_TEXT_LENGTH:
+                logger.info(f"Text length {len(text)} exceeds {MAX_TEXT_LENGTH}, chunking...")
+                return self.chunker.chunk_with_metadata(text, metadata_dict)
+            
+            # Return single document for short texts
+            return [{
+                "text": text,
+                "metadata": metadata_dict
+            }]
         except Exception as e:
             logger.error(f"Error processing message {message.get('_id', 'unknown')}: {str(e)}")
             return []
@@ -141,6 +150,7 @@ def process_telegram_data(last_run: Optional[str] = None) -> bool:
     """Process Telegram data and return True if new data was processed"""
     try:
         # Initialize processor with MongoDB connection details from environment variables
+        logger.info(f"Initializing TelegramProcessor with last_run: {last_run}")
         processor = TelegramProcessor()
         return processor.process_messages(last_run)
     except Exception as e:

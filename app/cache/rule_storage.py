@@ -97,17 +97,23 @@ class RuleStorage:
             logger.error(f"Error getting rules for user {user_id}: {e}")
             return []
 
-    async def get_active_rules(self, user_id: str, watch_type: str = None) -> List[Dict]:
-        """Get all active rules for a user"""
+    async def get_active_rules(self, user_id: str, watch_type: str = None, conversation_id: str = None, chat_type: str = None) -> List[Dict]:
+        """Get all active rules for a user or conversation"""
         try:
             # Initialize if not already initialized
             if self.collection is None:
                 await self.initialize()
 
-            query = {
-                "user_id": user_id,
-                "active": True
-            }
+            # Base query for active rules
+            query = {"active": True}
+            
+            # If conversation_id is provided and chat_type is group, find rules by conversation_id
+            if conversation_id and chat_type == "group":
+                query["metadata.conversation_id"] = conversation_id
+            else:
+                # For direct chat or non-group chat, find rules by user_id
+                query["user_id"] = user_id
+
             if watch_type:
                 query["watch_type"] = watch_type
 

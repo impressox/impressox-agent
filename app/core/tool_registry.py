@@ -1,68 +1,52 @@
-from typing import Dict, Any, Callable, Optional
+from typing import Dict, Callable, Optional, List
+from langchain_core.tools import Tool, BaseTool
 from app.constants import NodeName
 
 class ToolRegistry:
-    """Tool registry with guild-based implementations"""
+    """Tool registry with node-based implementation"""
     
     def __init__(self):
-        self._tools: Dict[str, Dict[str, Callable]]  = {}
-    
+        self._tools: Dict[str, Dict[str, BaseTool]] = {}
+
     def register(self, node_name: str, name: str):
         """
-        Decorator to register a tool implementation
-        Args:
-            node_name: str
-            name: Tool name
+        Decorator to register a LangChain-compatible tool instance
         """
-        def decorator(func: Callable):    
-            def add_func_to_tool(node_name: str, name: str, func: Callable):
-                if node_name not in self._tools:
-                    self._tools[node_name] = {}
-                if name not in self._tools[node_name]:
-                    self._tools[node_name][name] = func
+        def decorator(func: Callable):
+            # Ensure the function is wrapped into a LangChain Tool
+            if not isinstance(func, BaseTool):
+                tool = Tool.from_function(func)
+            else:
+                tool = func
 
-            if node_name == "*":          
+            def add_tool_to_node(node: str, tool_name: str, tool_obj: BaseTool):
+                if node not in self._tools:
+                    self._tools[node] = {}
+                self._tools[node][tool_name] = tool_obj
+
+            if node_name == "*":
                 for key, value in NodeName.__dict__.items():
                     if not key.startswith('__') and isinstance(value, str):
-                        add_func_to_tool(value, name, func)
+                        add_tool_to_node(value, name, tool)
             else:
-                add_func_to_tool(node_name, name, func)
-            
-            return func
+                add_tool_to_node(node_name, name, tool)
+
+            return tool  # return the tool instance (important for LangChain)
         return decorator
-    
-    def get_tools(self, node_name: str) -> Dict[str, Callable]:
-        """
-        Get all tool implementations based on node name
-        First checks guild-specific implementations, then falls back to default
-        """
 
-        # Get tenant-specific implementations
+    def get_tool(self, node_name: str, name: str) -> Optional[BaseTool]:
         node_tools = self._tools.get(node_name, {})
-        # Convert tools to list of Tool Dic 
-        tools_list = []
-        for name, func in node_tools.items():
-            tools_list.append(func)
-        # Fallback to default implementation
-        return tools_list
+        return node_tools.get(name)
 
-    def get_tool(self, node_name: str, name: str) -> Optional[Callable]:
+    def get_tools(self, node_name: str) -> List[BaseTool]:
         """
-        Get tool implementation based on tenant type
-        First checks guild-specific implementations, then falls back to default
+        Return list of LangChain BaseTool objects (safe to pass to ToolNode)
         """
-        
-        # Try to get tenant-specific implementation
         node_tools = self._tools.get(node_name, {})
-        if name in node_tools:
-            return node_tools[node_name][name]
-            
-        # Fallback to default implementation
-        return {}
+        return list(node_tools.values())
 
-# Global registry instance
+# Global singleton
 tool_registry = ToolRegistry()
 
 def register_tool(node_name: str, name: str):
-    """Convenience decorator to register tools"""
     return tool_registry.register(node_name, name)

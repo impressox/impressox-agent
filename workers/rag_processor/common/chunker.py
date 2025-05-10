@@ -13,7 +13,7 @@ class SemanticChunker:
         self.similarity_threshold = similarity_threshold
         self.language = language
         self.embedding_dim = self.embedder.get_embedding_dimension()
-        logger.info(f"SemanticChunker initialized with language={language}, embedding_dim={self.embedding_dim}")
+        logger.debug(f"SemanticChunker initialized with language={language}, embedding_dim={self.embedding_dim}")
 
     def _cosine_similarity(self, vec1: np.ndarray, vec2: np.ndarray) -> float:
         """Calculate cosine similarity between two vectors"""

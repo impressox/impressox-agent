@@ -13,9 +13,9 @@ pymongo>=4.6.0
 motor>=3.4.0  # for AsyncIOMotorClient
 
 # LangChain + LangGraph
-langchain>=0.1.0
+langchain>=0.3.25
 langchain-openai>=0.0.5
-langgraph>=0.0.10
+langgraph>=0.4.1
 langfuse>=2.0.0
 langchain-cohere>=0.0.6  # nếu bạn đang dùng ChatCohere
 
@@ -40,3 +40,10 @@ Levenshtein>=0.24.0  # cho fuzzy string matching
 web3>=7.11.0
 
 aioredis>=2.0.1
+
+numpy>=1.26.0,<2.0.0
+qdrant_client>=1.14.2
+
+#torch
+torch>=2.1.0
+transformers>=4.51.3
