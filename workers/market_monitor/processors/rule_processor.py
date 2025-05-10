@@ -1,11 +1,11 @@
 import asyncio
 import json
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from workers.market_monitor.shared.models import Rule
 from workers.market_monitor.shared.redis_utils import RedisClient
-from workers.market_monitor.utils.mongo import MongoClient
+from workers.market_monitor.utils.mongo import MongoClient, RuleStorage
 from workers.market_monitor.utils.mongo import MongoJSONEncoder
 
 logging.basicConfig(level=logging.INFO)
@@ -15,6 +15,19 @@ class RuleProcessor:
     def __init__(self):
         self.redis = None
         self.mongo = None
+        self.rule_storage = None
+
+    async def load_active_rules(self) -> List[Dict]:
+        """Load all active rules from MongoDB"""
+        try:
+            logger.info("[RuleProcessor] Loading active rules from MongoDB...")
+            self.rule_storage = await RuleStorage.get_instance()
+            active_rules = await self.rule_storage.get_active_rules()
+            logger.info(f"[RuleProcessor] Found {len(active_rules)} active rules")
+            return active_rules
+        except Exception as e:
+            logger.error(f"[RuleProcessor] Error loading active rules: {e}")
+            return []
 
     async def start(self):
         """Start the rule processor"""
@@ -25,6 +38,21 @@ class RuleProcessor:
             
             self.mongo = await MongoClient.get_instance()
             logger.info("[RuleProcessor] MongoDB connection established")
+
+            # Load and process active rules
+            active_rules = await self.load_active_rules()
+            if not active_rules:
+                logger.info("[RuleProcessor] No active rules found")
+            else:
+                logger.info(f"[RuleProcessor] Found {len(active_rules)} active rules")
+                for rule_data in active_rules:
+                    # Publish register_rule event for each rule
+                    await self.redis.publish(
+                        "market_watch:register_rule",
+                        json.dumps(rule_data, cls=MongoJSONEncoder)
+                    )
+                    logger.info(f"[RuleProcessor] Published register_rule event for rule {rule_data.get('rule_id')}")
+                logger.info("[RuleProcessor] Finished processing active rules")
 
             # Subscribe to register_rule channel
             logger.info("[RuleProcessor] Subscribing to market_watch:register_rule channel")

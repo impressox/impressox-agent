@@ -39,7 +39,7 @@ class TokenWatcher(BaseWatcher):
             alert_url = self.config.get_alert_url()
             alert_data = {
                 "level": "0",
-                "crypto": list(self.watching_targets) if self.watching_targets else []
+                "crypto": list(self.watching_targets) if self.watching_targets and '*' not in self.watching_targets else []
             }
             
             logger.info(f"[TokenWatcher] Calling alert API: {alert_url}, {alert_data}")

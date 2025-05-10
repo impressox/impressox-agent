@@ -90,10 +90,12 @@ class MongoClient:
         """Delete one document"""
         return await self.db[collection].delete_one(query)
 
-    async def get_active_rules(self, watch_type: str, active_only: bool = True) -> List[Dict]:
-        """Get active rules by watch type"""
+    async def get_active_rules(self, watch_type: Optional[str] = None, active_only: bool = True) -> List[Dict]:
+        """Get active rules, optionally filtered by watch type"""
         try:
-            query = {"watch_type": watch_type}
+            query = {}
+            if watch_type:
+                query["watch_type"] = watch_type
             if active_only:
                 query["active"] = True
             cursor = self.db.watch_rules.find(query)

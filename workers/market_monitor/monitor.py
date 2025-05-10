@@ -2,6 +2,7 @@ import asyncio
 import logging
 import signal
 import sys
+import os
 from typing import List, Optional
 from workers.market_monitor.services.worker_pool import WorkerPool
 from workers.market_monitor.services.base import BaseWatcher
@@ -19,7 +20,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler('market_monitor.log')
+        logging.FileHandler(os.path.join('logs', 'market_monitor.log'))
     ]
 )
 
