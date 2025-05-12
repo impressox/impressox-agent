@@ -15,13 +15,6 @@ aioredis>=2.0.1
 motor>=3.4.0
 pymongo>=4.6.0
 
-# Vector Store & LangChain
-langchain>=0.1.0
-langchain-community>=0.0.10
-langchain-openai>=0.0.5
-chromadb>=0.4.22
-openai>=1.12.0
-
 # Utils
 python-dotenv>=1.0.0
 pydantic>=2.0

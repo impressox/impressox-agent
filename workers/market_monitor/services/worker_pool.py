@@ -9,6 +9,7 @@ from datetime import datetime
 from workers.market_monitor.services.base import BaseWatcher
 from workers.market_monitor.services.token_watcher import TokenWatcher
 from workers.market_monitor.services.wallet_watcher import WalletWatcher
+from workers.market_monitor.services.airdrop_watcher import AirdropWatcher
 from workers.market_monitor.services.notification_service import NotificationService
 from workers.market_monitor.shared.redis_utils import RedisClient
 from workers.market_monitor.utils.config import get_config
@@ -40,6 +41,7 @@ class WorkerPool:
             logger.info("[WorkerPool] Initializing default workers...")
             await self.add_worker("token", TokenWatcher)
             await self.add_worker("wallet", WalletWatcher)
+            await self.add_worker("airdrop", AirdropWatcher)
             
             # Verify workers are running
             for worker_id, worker in self.workers.items():

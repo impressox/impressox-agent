@@ -38,15 +38,22 @@ class TelegramProcessor:
             # Extract timestamp from MongoDB ISODate format
             timestamp = message.get('timestamp', {})
             if isinstance(timestamp, dict) and '$date' in timestamp:
-                timestamp = timestamp['$date']
+                timestamp = int(timestamp['$date'])
             else:
-                timestamp = datetime.now().isoformat()
+                timestamp = int(datetime.now().timestamp())
+            
+            message_time = message.get('timestamp', {})
+            if isinstance(message_time, dict) and '$date' in message_time:
+                message_time = message_time['$date']
+            else:
+                message_time = datetime.now().isoformat()
 
             # Get metadata with safe values
             metadata = message.get('metadata', {})
             metadata_dict = {
                 "source": "telegram",
                 "message_id": str(message.get('_id', '')),
+                "message_time": message_time,
                 "sender": self._get_safe_value(metadata.get('user_name')),
                 "sender_full_name": self._get_safe_value(metadata.get('user_full_name')),
                 "chat_id": str(message.get('chat_id', '')),

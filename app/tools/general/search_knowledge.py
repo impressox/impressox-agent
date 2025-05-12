@@ -4,7 +4,7 @@ from app.core.tool_registry import register_tool
 from app.constants import NodeName
 from app.core.vector_store import VectorStoreManager
 
-async def search_knowledge(query: str, top_k: int = 3, source: Optional[str] = "twitter") -> Dict:
+async def search_knowledge(query: str, top_k: int = 10, source: Optional[str] = "twitter") -> Dict:
     """
     Search for relevant knowledge from vector store based on user query
     

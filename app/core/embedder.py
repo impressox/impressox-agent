@@ -2,17 +2,20 @@ import os
 import numpy as np
 import torch
 import logging
-from transformers import AutoTokenizer, AutoModel
+from sentence_transformers import SentenceTransformer
 from typing import List
 from app.configs.config import app_configs
 
+# Configure logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+# Disable flash attention
+os.environ["FLASH_ATTENTION_FORCE_DISABLED"] = "1"
 
 class Embedder:
     _instance = None
     _model = None
-    _tokenizer = None
     _embedding_dim = None
 
     def __new__(cls):
@@ -30,9 +33,11 @@ class Embedder:
             device_config = config.get("device", {})
 
             self.model_name = model_config.get("name", "jinaai/jina-embeddings-v3")
-            self.trust_remote_code = model_config.get("trust_remote_code", True)
             self.hf_token = auth_config.get("huggingface_token")
             
+            logger.info(f"Using model: {self.model_name}")
+            logger.info(f"Config: {config}")
+
             if not self.hf_token:
                 raise ValueError("HUGGINGFACE_TOKEN not found in config")
 
@@ -40,17 +45,14 @@ class Embedder:
             self.device = torch.device("cuda" if use_cuda and torch.cuda.is_available() else "cpu")
             logger.info(f"Using device: {self.device}")
 
-            self._tokenizer = AutoTokenizer.from_pretrained(
+            # Initialize model using sentence-transformers
+            self._model = SentenceTransformer(
                 self.model_name,
-                token=self.hf_token
+                device=self.device,
+                use_auth_token=self.hf_token,
+                trust_remote_code=True
             )
-            self._model = AutoModel.from_pretrained(
-                self.model_name,
-                token=self.hf_token,
-                trust_remote_code=self.trust_remote_code
-            ).to(self.device)
-            self._model.eval()
-            self._embedding_dim = self._model.config.hidden_size
+            self._embedding_dim = self._model.get_sentence_embedding_dimension()
             logger.info(f"Initialized Embedder with dimension {self._embedding_dim}")
 
         except Exception as e:
@@ -61,55 +63,55 @@ class Embedder:
         """Get the dimension of the embeddings"""
         return self._embedding_dim
 
-    def _mean_pooling(self, model_output, attention_mask):
-        """Mean pooling with attention mask"""
-        try:
-            token_embeddings = model_output[0]
-            input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
-            sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, 1)
-            sum_mask = input_mask_expanded.sum(1).clamp(min=1e-9)
-            mean_embeddings = sum_embeddings / sum_mask
-            return mean_embeddings
-        except Exception as e:
-            logger.error(f"Error in mean pooling: {str(e)}")
-            raise
-
     def embed_text(self, text: str) -> np.ndarray:
-        """Embed a single text string"""
-        try:
-            encoded_input = self._tokenizer(text, return_tensors="pt", padding=True, truncation=True).to(self.device)
-            with torch.no_grad():
-                model_output = self._model(**encoded_input)
-            embedding = self._mean_pooling(model_output, encoded_input["attention_mask"])
-            embedding_np = embedding[0].detach().cpu().numpy()
+            """Embed a single text string with safety checks and normalization."""
+            try:
+                text = text.strip()
+                if not text:
+                    logger.warning("Empty text received for embedding.")
+                    return np.zeros(self._embedding_dim)
 
-            if embedding_np.shape != (self._embedding_dim,):
-                logger.warning(f"Invalid embedding shape: {embedding_np.shape}")
+                embedding = self._model.encode(text, convert_to_numpy=True, truncate=False)
+
+                if embedding.shape != (self._embedding_dim,):
+                    logger.warning(f"Unexpected embedding shape: {embedding.shape}")
+                    return np.zeros(self._embedding_dim)
+
+                # Normalize vector (cosine similarity requires unit vectors)
+                norm = np.linalg.norm(embedding)
+                if norm == 0:
+                    logger.warning("Embedding vector has zero norm.")
+                    return np.zeros(self._embedding_dim)
+
+                return embedding / norm
+
+            except Exception as e:
+                logger.error(f"Error embedding text: {str(e)}")
                 return np.zeros(self._embedding_dim)
 
-            return embedding_np
-        except Exception as e:
-            logger.error(f"Error embedding text: {str(e)}")
-            return np.zeros(self._embedding_dim)
-
     def embed_batch(self, texts: List[str]) -> List[np.ndarray]:
-        """Embed a list of texts"""
+        """Embed a list of texts with validation and normalization."""
         try:
-            encoded_input = self._tokenizer(texts, return_tensors="pt", padding=True, truncation=True).to(self.device)
-            with torch.no_grad():
-                model_output = self._model(**encoded_input)
-            embeddings = self._mean_pooling(model_output, encoded_input["attention_mask"])
-            embeddings_np = embeddings.detach().cpu().numpy()
+            clean_texts = [t.strip() if t else "" for t in texts]
+            embeddings = self._model.encode(clean_texts, convert_to_numpy=True, truncate=False)
 
             final_embeddings = []
-            for emb in embeddings_np:
+            for i, emb in enumerate(embeddings):
                 if emb.shape != (self._embedding_dim,):
-                    logger.warning(f"Invalid embedding shape: {emb.shape}")
+                    logger.warning(f"Invalid shape at index {i}: {emb.shape}")
                     final_embeddings.append(np.zeros(self._embedding_dim))
-                else:
-                    final_embeddings.append(emb)
+                    continue
+
+                norm = np.linalg.norm(emb)
+                if norm == 0:
+                    logger.warning(f"Zero norm at index {i}")
+                    final_embeddings.append(np.zeros(self._embedding_dim))
+                    continue
+
+                final_embeddings.append(emb / norm)
 
             return final_embeddings
+
         except Exception as e:
             logger.error(f"Error embedding batch: {str(e)}")
-            return [np.zeros(self._embedding_dim) for _ in texts] 
+            return [np.zeros(self._embedding_dim) for _ in texts]

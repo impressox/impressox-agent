@@ -1,0 +1,7 @@
+twscrape==0.17.0
+pymongo==4.6.1
+python-dotenv==1.0.1
+requests==2.31.0
+schedule==1.2.1
+pydantic-core>=2.18.2,<3.0.0
+pydantic-settings>=2.4.0,<3.0.0 

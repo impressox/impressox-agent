@@ -84,3 +84,4 @@ chroma_db/
 workers/twitter_scraper/config
 proxy.txt
 last_run.json
+keyword_accounts.txt

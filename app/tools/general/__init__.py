@@ -6,6 +6,7 @@ from app.tools.general.summary_social import get_social_summary
 from app.tools.general.watch_market import watch_market
 from app.tools.general.unwatch_market import unwatch_market
 from app.tools.general.search_knowledge import search_knowledge_tool
+from app.tools.general.notification_control import toggle_notification
 import asyncio
 
 @register_tool(NodeName.GENERAL_NODE, "get_token_price")
@@ -26,5 +27,6 @@ __all__ = [
     "get_social_summary",
     "watch_market",
     "unwatch_market",
-    "search_knowledge_tool"
+    "search_knowledge_tool",
+    "toggle_notification"
 ]

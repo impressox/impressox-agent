@@ -8,7 +8,9 @@ from clients.telegram.handlers.message_handler import (
     handle_message, 
     handle_new_session, 
     handle_start,
-    handle_chat_member_update
+    handle_chat_member_update,
+    handle_notify_on,
+    handle_notify_off
 )
 from clients.telegram.utils.logger import logger
 
@@ -20,7 +22,9 @@ async def setup_commands(application: Application):
     commands = [
         BotCommand("start", "Show basic instructions and start a new conversation with Lili"),
         BotCommand("new", "Start a fresh conversation with Lili"),
-        BotCommand("help", "Show help message")
+        BotCommand("help", "Show help message"),
+        BotCommand("notify_on", "Enable market notifications"),
+        BotCommand("notify_off", "Disable market notifications")
     ]
     await application.bot.set_my_commands(commands)
 
@@ -56,9 +60,11 @@ def get_bot_application() -> Application:
         _bot_application.add_handler(CommandHandler("new", handle_new_session))
         _bot_application.add_handler(CommandHandler("start", handle_start))
         _bot_application.add_handler(CommandHandler("help", handle_start))
+        _bot_application.add_handler(CommandHandler("notify_on", handle_notify_on))
+        _bot_application.add_handler(CommandHandler("notify_off", handle_notify_off))
 
         # Handle chat member updates (when bot is added/removed from groups)
-        _bot_application.add_handler(ChatMemberHandler(handle_chat_member_update, ChatMemberHandler.CHAT_MEMBER))
+        _bot_application.add_handler(ChatMemberHandler(handle_chat_member_update, ChatMemberHandler.MY_CHAT_MEMBER))
 
     return _bot_application
 

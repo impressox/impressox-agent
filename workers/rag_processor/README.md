@@ -7,7 +7,7 @@ This worker implements a semantic-aware chunking and embedding pipeline for proc
 - Scheduled data processing every 5 minutes
 - Semantic-aware text chunking using sentence splitting and similarity
 - Jina Embeddings V3 for high-quality embeddings
-- ChromaDB vector store for efficient storage and retrieval
+- Qdrant vector store for efficient storage and retrieval
 - Support for multiple data sources (Twitter and Telegram)
 - Rich metadata tracking for each chunk
 
@@ -30,8 +30,13 @@ export TWITTER_ACCESS_TOKEN_SECRET="your_access_token_secret"
 export MONGODB_URI="mongodb://localhost:27017"
 export MONGODB_DB="telegram_db"
 
-# Jina API key
-export JINA_API_KEY="your_jina_api_key"
+# HuggingFace token for Jina embeddings
+export HUGGINGFACE_TOKEN="your_huggingface_token"
+
+# Qdrant connection
+export QDRANT_HOST="localhost"
+export QDRANT_PORT="6333"
+export QDRANT_API_KEY="your_qdrant_api_key"  # Optional
 ```
 
 3. Run the worker:
@@ -48,20 +53,20 @@ python scheduler.py
 - `common/`: Shared utilities
   - `chunker.py`: Semantic-aware text chunker
   - `embedder.py`: Jina embeddings wrapper
-  - `vector_store.py`: ChromaDB vector store interface
+  - `vector_store.py`: Qdrant vector store interface
 
 ## Data Flow
 
 1. Scheduler triggers data processing every 5 minutes
 2. Each source processor fetches new data since last run
-3. Text is split into sentences and embedded
+3. Text is split into sentences and embedded using Jina Embeddings V3
 4. Similar sentences are merged into semantic chunks
-5. Chunks are embedded and stored in ChromaDB with metadata
+5. Chunks are embedded and stored in Qdrant with metadata
 6. Last run timestamps are updated
 
 ## Usage
 
-The processed data can be queried from ChromaDB using the VectorStore class:
+The processed data can be queried from Qdrant using the VectorStore class:
 
 ```python
 from common.vector_store import VectorStore
@@ -77,6 +82,12 @@ results = store.search(
     where={"source": "twitter"},
     n_results=5
 )
+
+# Get documents by source
+results = store.get_by_source("twitter", limit=100)
+
+# Delete documents by source
+store.delete_by_source("telegram")
 ```
 
 ## Metadata
@@ -87,4 +98,20 @@ Each chunk includes the following metadata:
 - timestamp: ISO format timestamp
 - chat_type: type of conversation
 - post_id/message_id: unique identifier
-- Additional source-specific metadata 
+- Additional source-specific metadata
+
+## Vector Store
+
+The system uses Qdrant as the vector store with the following configuration:
+- Collection name: "rag_data"
+- Vector dimension: 1024 (Jina Embeddings V3)
+- Distance metric: Cosine similarity
+- Index type: HNSW (Hierarchical Navigable Small World)
+
+## Embedding Model
+
+Jina Embeddings V3 is used for generating high-quality embeddings:
+- Model: jinaai/jina-embeddings-v3
+- Dimension: 1024
+- Features: Mean pooling with attention mask
+- Support for batch processing 

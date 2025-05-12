@@ -41,6 +41,23 @@ class VectorStore:
                 )
             )
 
+            self.client.create_payload_index(
+                collection_name="rag_data",
+                field_name="timestamp",
+                field_schema="integer"
+            )
+
+        self.client.delete_payload_index(
+            collection_name="rag_data",
+            field_name="post_id"
+        )
+
+        self.client.create_payload_index(
+            collection_name="rag_data",
+            field_name="post_id",
+            field_schema="integer"
+        )
+
     def add_documents(self, documents: List[Dict]):
         """Add documents to the vector store"""
         if not documents:
@@ -50,12 +67,12 @@ class VectorStore:
             texts = [doc["text"] for doc in documents]
             metadatas = [doc["metadata"] for doc in documents]
 
-            # TODO: Replace this with real embedding model
-            vectors = [np.random.rand(768).tolist() for _ in texts]
+            # Generate embeddings using the model
+            vectors = self.embedder.embed_batch(texts)
 
             points = [
                 PointStruct(
-                    id=str(uuid.uuid4()),  # Generate UUID for each point
+                    id=str(uuid.uuid5(uuid.NAMESPACE_DNS, text)),
                     vector=vector,
                     payload={**metadata, "text": text}
                 )
@@ -71,45 +88,6 @@ class VectorStore:
         except Exception as e:
             print(f"Error adding documents: {str(e)}")
             raise
-
-    def search(
-        self,
-        query: str,
-        n_results: int = 5,
-        where: Optional[Dict] = None
-    ) -> List[Dict]:
-        """Search for similar documents"""
-        try:
-            # TODO: Replace with actual embedding
-            query_vector = np.random.rand(768).tolist()
-
-            filter_query = None
-            if where:
-                filter_query = Filter(
-                    must=[
-                        FieldCondition(key=k, match=MatchValue(value=v))
-                        for k, v in where.items()
-                    ]
-                )
-
-            results = self.client.search(
-                collection_name=self.collection_name,
-                query_vector=query_vector,
-                limit=n_results,
-                query_filter=filter_query
-            )
-
-            return [
-                {
-                    "text": hit.payload.get("text", ""),
-                    "metadata": hit.payload,
-                    "score": hit.score
-                }
-                for hit in results
-            ]
-        except Exception as e:
-            print(f"Error searching vector store: {str(e)}")
-            return []
 
     def get_by_source(self, source: str, limit: int = 100) -> List[Dict]:
         """Get documents by source"""

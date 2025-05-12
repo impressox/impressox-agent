@@ -20,7 +20,7 @@ MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017')
 client = MongoClient(MONGO_URI)
 db_name = os.getenv('DB_NAME', 'cpx-data')
 db = client[db_name]
-db_collection = os.getenv('DB_COLLECTION', 'tweets')
+db_collection = os.getenv('DB_COLLECTION', 'airdrop_tweets')
 tweets_collection = db[db_collection]
 
 # Directory configuration
@@ -31,10 +31,10 @@ CONFIG_DIR = os.path.join(BASE_DIR, 'config')
 os.makedirs(CONFIG_DIR, exist_ok=True)
 
 # File paths
-PROXY_API_URL = os.getenv("PROXY_API_URL", "https://proxyxoay.org/api/get.php?key=WQFISlkMuFcCNPSEsmjIyX&&nhamang=random&&tinhthanh=0")
+PROXY_API_URL = os.getenv("PROXY_API_URL", "xx")
 PROXY_CACHE_FILE = os.path.join(CONFIG_DIR, "proxy.txt")
-ACCOUNTS_FILE = os.path.join(CONFIG_DIR, "accounts.txt")
-USERS_FILE = os.path.join(CONFIG_DIR, "users.txt")
+ACCOUNTS_FILE = os.path.join(CONFIG_DIR, "keyword_accounts.txt")
+KEYWORDS_FILE = os.path.join(CONFIG_DIR, "keywords.txt")
 
 # Proxy configuration
 USE_PROXY = os.getenv('USE_PROXY', 'true').lower() == 'true'
@@ -138,9 +138,9 @@ class ProxyManager:
         
         return self.current_proxy
 
-class TwitterScraper:
+class KeywordScraper:
     def __init__(self):
-        print("Initializing TwitterScraper...")
+        print("Initializing KeywordScraper...")
         self.proxy_manager = ProxyManager()
         print("ProxyManager initialized")
         
@@ -149,7 +149,7 @@ class TwitterScraper:
         self.retry_delay = 5
         self.running = True
         self.current_task = None
-        self.max_concurrent_users = 5  # Số lượng user tối đa chạy đồng thời
+        self.max_concurrent_keywords = 3  # Maximum number of keywords to process concurrently
         
         # Create event loop
         self.loop = asyncio.new_event_loop()
@@ -215,7 +215,7 @@ class TwitterScraper:
     def setup_accounts(self):
         """Setup Twitter accounts for scraping"""
         if not os.path.exists(ACCOUNTS_FILE):
-            print(f"Please create {ACCOUNTS_FILE} with Twitter accounts in format: username:password:email:email_password:2fa_code")
+            print(f"Please create {ACCOUNTS_FILE} with Twitter accounts in format: username:password:2fa:email:email_password")
             return
 
         print(f"Reading accounts from {ACCOUNTS_FILE}...")
@@ -229,9 +229,12 @@ class TwitterScraper:
                         else:
                             parts = line.strip().split(':')
                             
-                        parts = [p.strip() for p in parts if p.strip()][:5]    
+                        # Clean up any empty parts and take only first 5 parts
+                        parts = [p.strip() for p in parts if p.strip()][:5]
+                            
                         if len(parts) < 5:
-                            print(f"Invalid account format at line {line_num}. Expected username:password:email:email_password:2fa_code or username|password|email|email_password|2fa_code, got: {line.strip()}")
+                            print(f"Invalid account format at line {line_num}. Expected at least 5 parts (username:password:2fa:email:email_password), got {len(parts)} parts: {line.strip()}")
+                            print("Please ensure each line has at least 5 parts separated by ':' or '|'")
                             continue
                             
                         username, password, code, email, email_password = parts
@@ -240,6 +243,8 @@ class TwitterScraper:
                         print(f"Successfully added account: {username}")
                     except Exception as e:
                         print(f"Error adding account at line {line_num}: {str(e)}")
+                        print(f"Problematic line: {line.strip()}")
+                        print("Expected format: username:password:2fa:email:email_password")
                         import traceback
                         print(f"Error details: {traceback.format_exc()}")
 
@@ -265,23 +270,10 @@ class TwitterScraper:
             print(f"Error during login process: {e}")
             import traceback
             print(f"Error details: {traceback.format_exc()}")
-            # Try to get more detailed error information
-            try:
-                accounts = await self.api.pool.accounts_info()
-                print("\nCurrent account status:")
-                for acc in accounts:
-                    print(f"Account: {acc['username']}")
-                    print(f"Active: {acc['active']}")
-                    print(f"Login: {acc['logged_in']}")
-                    print(f"Last used: {acc['last_used']}")
-                    print("---")
-            except Exception as e2:
-                print(f"Error getting account status: {e2}")
 
     async def check_account_status(self):
         """Check if accounts are properly authenticated"""
         try:
-            # Get all accounts in pool
             accounts = await self.api.pool.accounts_info()
             print("\nAccount Status:")
             active_accounts = 0
@@ -306,24 +298,13 @@ class TwitterScraper:
             print(f"Error checking account status: {e}")
             import traceback
             print(f"Error details: {traceback.format_exc()}")
-            # Try to get basic account info even if detailed info fails
-            try:
-                accounts = await self.api.pool.accounts_info()
-                print("\nBasic Account Status:")
-                for acc in accounts:
-                    print(f"Username: {acc['username']}")
-                    print(f"Active: {acc['active']}")
-                    print(f"Login: {acc['logged_in']}")
-                    print("---")
-            except Exception as e2:
-                print(f"Error getting basic account info: {e2}")
 
-    async def get_tweets(self, username):
-        """Get tweets for a user using twscrape"""
+    async def search_tweets(self, keyword):
+        """Search tweets for a keyword using twscrape"""
         try:
             # Update proxy before making requests
             if not self.update_proxy():
-                print(f"Failed to update proxy for {username}, retrying...")
+                print(f"Failed to update proxy for keyword {keyword}, retrying...")
                 return []
             
             # Check account status first with timeout
@@ -334,38 +315,9 @@ class TwitterScraper:
                 print("Timeout while checking account status")
                 return []
             
-            print(f"\nTrying to find user: {username}")
-            # Search for the target user
-            try:
-                # Get current account info before search
-                accounts = await self.api.pool.accounts_info()
-                current_account = next((acc for acc in accounts if acc['active']), None)
-                if current_account:
-                    print(f"Using account: {current_account['username']}")
-                
-                users = await gather(self.api.search_user(username))
-                
-                # Get account info after search to check if it switched
-                accounts_after = await self.api.pool.accounts_info()
-                current_account_after = next((acc for acc in accounts_after if acc['active']), None)
-                if current_account_after and current_account and current_account_after['username'] != current_account['username']:
-                    print(f"Account switched from {current_account['username']} to {current_account_after['username']}")
-                
-                if not users:
-                    print(f"Could not find user: {username}")
-                    return []
-                    
-                target_user = users[0]
-                print(f"Found target user: {target_user.username} (ID: {target_user.id})")
-            except Exception as e:
-                print(f"Error searching for user {username}: {e}")
-                import traceback
-                print(f"Error details: {traceback.format_exc()}")
-                # Force proxy update on error
-                self.proxy_manager.current_proxy = None
-                return []
+            print(f"\nSearching for keyword: {keyword}")
             
-            # Get tweets using user_id with timeout
+            # Get tweets using search with timeout
             tweets = []
             last_proxy_check = time.time()
             proxy_check_interval = 30  # Check proxy every 30 seconds during tweet fetching
@@ -376,9 +328,9 @@ class TwitterScraper:
                     accounts = await self.api.pool.accounts_info()
                     current_account = next((acc for acc in accounts if acc['active']), None)
                     if current_account:
-                        print(f"Using account for tweets: {current_account['username']}")
+                        print(f"Using account for search: {current_account['username']}")
                     
-                    async for tweet in self.api.user_tweets(target_user.id, limit=self.tweet_limit):
+                    async for tweet in self.api.search(keyword, limit=self.tweet_limit):
                         if not self.running:  # Check if we should stop
                             print("Received stop signal, stopping tweet collection")
                             break
@@ -386,28 +338,28 @@ class TwitterScraper:
                         # Check and update proxy if needed
                         current_time = time.time()
                         if current_time - last_proxy_check >= proxy_check_interval:
-                            print(f"[{username}] Checking proxy status...")
+                            print(f"[{keyword}] Checking proxy status...")
                             if self.proxy_manager.should_update_proxy():
-                                print(f"[{username}] Updating proxy during tweet fetching...")
+                                print(f"[{keyword}] Updating proxy during tweet fetching...")
                                 if not self.update_proxy():
-                                    print(f"[{username}] Failed to update proxy, stopping tweet collection")
+                                    print(f"[{keyword}] Failed to update proxy, stopping tweet collection")
                                     break
                             last_proxy_check = current_time
                             
                         # Print raw tweet data for debugging
-                        print(f"[{username}] Raw tweet data: {tweet.id_str}")
+                        print(f"[{keyword}] Raw tweet data: {tweet.id_str}")
                         
                         tweet_data = {
-                            'user': username,
-                            'post_id': tweet.id,
-                            'post_link': f"https://x.com/{username}/status/{tweet.id}",
+                            'keyword': keyword,
+                            'post_id': tweet.id_str,
+                            'post_link': f"https://x.com/{tweet.user.username}/status/{tweet.id}",
                             'text': tweet.rawContent.strip(),
                             'post_time': tweet.date,
                             'likes': tweet.likeCount,
                             'total_comments': tweet.replyCount,
                             'reposts': tweet.retweetCount,
                             'quotes': tweet.quoteCount,
-                            'comments': [],
+                            'user': tweet.user.username,
                             'updated_at': datetime.now().isoformat()
                         }
                         tweets.append(tweet_data)
@@ -430,40 +382,40 @@ class TwitterScraper:
                 
             return tweets
         except Exception as e:
-            print(f"Error getting tweets: {e}")
+            print(f"Error searching tweets: {e}")
             import traceback
             print(f"Error details: {traceback.format_exc()}")
             # Force proxy update on error
             self.proxy_manager.current_proxy = None
             return []
 
-    async def process_user_tweets(self, username):
-        """Process tweets for a single user"""
+    async def process_keyword_tweets(self, keyword):
+        """Process tweets for a single keyword"""
         for attempt in range(self.retry_count):
             if not self.running:
-                print(f"Received stop signal, stopping processing for {username}")
+                print(f"Received stop signal, stopping processing for keyword {keyword}")
                 return
                 
             try:
-                print(f"Attempt {attempt + 1}/{self.retry_count} for {username}")
+                print(f"Attempt {attempt + 1}/{self.retry_count} for keyword {keyword}")
                 # Update proxy before each attempt
                 self.update_proxy()
                 
                 # Get tweets using asyncio with timeout
                 try:
-                    tweets = await asyncio.wait_for(self.get_tweets(username), timeout=12000)
+                    tweets = await asyncio.wait_for(self.search_tweets(keyword), timeout=12000)
                 except asyncio.TimeoutError:
-                    print(f"Timeout while scraping tweets for {username}")
+                    print(f"Timeout while scraping tweets for keyword {keyword}")
                     continue
                 except Exception as e:
-                    print(f"Error in get_tweets for {username}: {e}")
+                    print(f"Error in search_tweets for keyword {keyword}: {e}")
                     continue
 
                 # Save to MongoDB
                 if tweets:
                     for tweet in tweets:
                         if not self.running:
-                            print(f"Received stop signal, stopping save to MongoDB for {username}")
+                            print(f"Received stop signal, stopping save to MongoDB for keyword {keyword}")
                             return
                             
                         try:
@@ -473,56 +425,56 @@ class TwitterScraper:
                                 upsert=True
                             )
                             if result.upserted_id:
-                                print(f"[{username}] Inserted new tweet: {tweet['post_id']}")
+                                print(f"[{keyword}] Inserted new tweet: {tweet['post_id']}")
                             elif result.modified_count > 0:
-                                print(f"[{username}] Updated existing tweet: {tweet['post_id']}")
+                                print(f"[{keyword}] Updated existing tweet: {tweet['post_id']}")
                         except Exception as e:
-                            print(f"[{username}] Error saving tweet {tweet['post_id']} to MongoDB: {e}")
+                            print(f"[{keyword}] Error saving tweet {tweet['post_id']} to MongoDB: {e}")
                             continue
                             
-                    print(f"Saved {len(tweets)} tweets for user {username}")
+                    print(f"Saved {len(tweets)} tweets for keyword {keyword}")
                     return  # Success, exit the retry loop
                 else:
-                    print(f"No tweets found for user {username}")
+                    print(f"No tweets found for keyword {keyword}")
                     return
 
             except Exception as e:
-                print(f"Attempt {attempt + 1}/{self.retry_count} failed for {username}: {e}")
+                print(f"Attempt {attempt + 1}/{self.retry_count} failed for keyword {keyword}: {e}")
                 if attempt < self.retry_count - 1:
                     print(f"Retrying in {self.retry_delay} seconds...")
                     await asyncio.sleep(self.retry_delay)
                     # Force proxy update on retry
                     self.proxy_manager.current_proxy = None
                 else:
-                    print(f"All attempts failed for {username}")
+                    print(f"All attempts failed for keyword {keyword}")
 
-    async def process_users_batch(self, usernames):
-        """Process a batch of users concurrently"""
+    async def process_keywords_batch(self, keywords):
+        """Process a batch of keywords concurrently"""
         tasks = []
-        for username in usernames:
+        for keyword in keywords:
             if not self.running:
                 break
-            task = asyncio.create_task(self.process_user_tweets(username))
+            task = asyncio.create_task(self.process_keyword_tweets(keyword))
             tasks.append(task)
         
         if tasks:
             await asyncio.gather(*tasks)
 
-    def scrape_user_tweets(self, usernames):
-        """Scrape tweets for multiple users concurrently"""
+    def scrape_keyword_tweets(self, keywords):
+        """Scrape tweets for multiple keywords concurrently"""
         if not self.running:
             return
 
-        # Process users in batches to control concurrency
-        for i in range(0, len(usernames), self.max_concurrent_users):
+        # Process keywords in batches to control concurrency
+        for i in range(0, len(keywords), self.max_concurrent_keywords):
             if not self.running:
                 break
                 
-            batch = usernames[i:i + self.max_concurrent_users]
-            print(f"\nProcessing batch of {len(batch)} users...")
+            batch = keywords[i:i + self.max_concurrent_keywords]
+            print(f"\nProcessing batch of {len(batch)} keywords...")
             
             # Run the batch processing using the same event loop
-            self.loop.run_until_complete(self.process_users_batch(batch))
+            self.loop.run_until_complete(self.process_keywords_batch(batch))
             
             if not self.running:
                 break
@@ -543,12 +495,12 @@ signal.signal(signal.SIGTERM, signal_handler)
 
 def main():
     global scraper
-    print("Starting Twitter scraper...")
+    print("Starting Keyword scraper...")
     try:
-        scraper = TwitterScraper()
-        print("TwitterScraper initialized successfully")
+        scraper = KeywordScraper()
+        print("KeywordScraper initialized successfully")
     except Exception as e:
-        print(f"Error initializing TwitterScraper: {e}")
+        print(f"Error initializing KeywordScraper: {e}")
         import traceback
         print(f"Error details: {traceback.format_exc()}")
         return
@@ -559,15 +511,15 @@ def main():
             
         try:
             print("\nStarting new scraping job...")
-            if not os.path.exists(USERS_FILE):
-                print(f"Please create {USERS_FILE} with Twitter usernames to scrape")
+            if not os.path.exists(KEYWORDS_FILE):
+                print(f"Please create {KEYWORDS_FILE} with keywords to search")
                 return
                 
-            with open(USERS_FILE, 'r') as f:
-                usernames = [line.strip() for line in f if line.strip()]
+            with open(KEYWORDS_FILE, 'r') as f:
+                keywords = [line.strip() for line in f if line.strip()]
             
-            print(f"Found {len(usernames)} users to process")
-            scraper.scrape_user_tweets(usernames)
+            print(f"Found {len(keywords)} keywords to process")
+            scraper.scrape_keyword_tweets(keywords)
                 
             print("Job completed successfully")
         except Exception as e:
@@ -578,7 +530,7 @@ def main():
     # Schedule the job to run every 5 minutes
     schedule.every(5).minutes.do(job)
     
-    print("Twitter scraper is running. Press Ctrl+C to stop.")
+    print("Keyword scraper is running. Press Ctrl+C to stop.")
     print("First job will start immediately...")
     
     # Run immediately on start

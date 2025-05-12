@@ -4,10 +4,6 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, Optional
 from motor.motor_asyncio import AsyncIOMotorClient
-from langchain_community.vectorstores import Chroma
-from langchain_openai import OpenAIEmbeddings
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.schema import Document
 from clients.config import MONGO_URI, MONGO_DB
 from clients.telegram.utils.logger import logger
 
@@ -21,21 +17,6 @@ class ChatHistoryService:
         # Create text index for search
         self.collection.create_index([("message", "text")])
 
-        # Vector store setup (disabled for now)
-        self.use_vector_store = False
-        if self.use_vector_store:
-            self.embeddings = OpenAIEmbeddings()
-            self.text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=1000,
-                chunk_overlap=200,
-                length_function=len,
-            )
-            self.vector_store = Chroma(
-                collection_name="telegram_chat_history",
-                embedding_function=self.embeddings,
-                persist_directory="./data/chat_history"
-            )
-
     async def save_message(self, 
                           message: str,
                           user_id: str,
@@ -44,6 +25,21 @@ class ChatHistoryService:
                           metadata: Dict[str, Any]) -> None:
         """
         Save a message to chat history
+        Args:
+            message: Message content
+            user_id: ID of the user who sent the message
+            chat_id: ID of the chat (group or private)
+            chat_type: Type of chat (private, group, supergroup)
+            metadata: Additional message metadata including:
+                - message_type: Type of message (user, ai, system)
+                - user_name: Username of sender
+                - user_full_name: Full name of sender
+                - message_id: Telegram message ID
+                - thread_id: Thread ID if in a forum
+                - is_reply: Whether message is a reply
+                - reply_to_message_id: ID of message being replied to
+                - reply_to_user_id: ID of user being replied to
+                - replied_message_content: Content of replied message
         """
         try:
             document = {
@@ -51,28 +47,21 @@ class ChatHistoryService:
                 "user_id": user_id,
                 "chat_id": chat_id,
                 "chat_type": chat_type,
-                "metadata": metadata or {},
-                "timestamp": datetime.utcnow()
+                "metadata": {
+                    "message_type": metadata.get("message_type", "user"),  # user, ai, or system
+                    "user_name": metadata.get("user_name"),
+                    "user_full_name": metadata.get("user_full_name"),
+                    "message_id": metadata.get("message_id"),
+                    "thread_id": metadata.get("thread_id"),
+                    "is_reply": metadata.get("is_reply", False),
+                    "reply_to_message_id": metadata.get("reply_to_message_id"),
+                    "reply_to_user_id": metadata.get("reply_to_user_id"),
+                    "replied_message_content": metadata.get("replied_message_content"),
+                    "timestamp": datetime.utcnow().isoformat()
+                }
             }
             await self.collection.insert_one(document)
-
-            # Save to vector store if enabled
-            if self.use_vector_store:
-                vector_doc = Document(
-                    page_content=message,
-                    metadata={
-                        "user_id": user_id,
-                        "chat_id": chat_id,
-                        "chat_type": chat_type,
-                        "timestamp": datetime.now().isoformat(),
-                        **metadata
-                    }
-                )
-                docs = self.text_splitter.split_documents([vector_doc])
-                self.vector_store.add_documents(docs)
-                self.vector_store.persist()
-
-            logger.info(f"Saved message from user {user_id} in chat {chat_id}")
+            logger.info(f"Saved {metadata.get('message_type', 'user')} message from {user_id} in {chat_type} {chat_id}")
 
         except Exception as e:
             logger.error(f"Error saving message to chat history: {e}")
@@ -85,30 +74,18 @@ class ChatHistoryService:
         Search for similar messages in chat history
         """
         try:
-            if self.use_vector_store:
-                # Vector store search
-                filter_dict = {}
-                if chat_id:
-                    filter_dict["chat_id"] = chat_id
-                results = self.vector_store.similarity_search(
-                    query,
-                    k=limit,
-                    filter=filter_dict if filter_dict else None
-                )
-                return results
-            else:
-                # MongoDB text search
-                search_query = {"$text": {"$search": query}}
-                if chat_id:
-                    search_query["chat_id"] = chat_id
-                
-                cursor = self.collection.find(
-                    search_query,
-                    {"score": {"$meta": "textScore"}}
-                ).sort([("score", {"$meta": "textScore"})]).limit(limit)
-                
-                results = await cursor.to_list(length=limit)
-                return results
+            # MongoDB text search
+            search_query = {"$text": {"$search": query}}
+            if chat_id:
+                search_query["chat_id"] = chat_id
+            
+            cursor = self.collection.find(
+                search_query,
+                {"score": {"$meta": "textScore"}}
+            ).sort([("score", {"$meta": "textScore"})]).limit(limit)
+            
+            results = await cursor.to_list(length=limit)
+            return results
 
         except Exception as e:
             logger.error(f"Error searching messages: {e}")
@@ -121,23 +98,13 @@ class ChatHistoryService:
         Get chat history for a specific chat
         """
         try:
-            if self.use_vector_store:
-                # Vector store search
-                results = self.vector_store.similarity_search(
-                    "",  # Empty query to get all
-                    k=limit,
-                    filter={"chat_id": chat_id}
-                )
-                results.sort(key=lambda x: x.metadata["timestamp"], reverse=True)
-                return results
-            else:
-                # MongoDB query
-                cursor = self.collection.find(
-                    {"chat_id": chat_id}
-                ).sort("timestamp", -1).limit(limit)
-                
-                results = await cursor.to_list(length=limit)
-                return results
+            # MongoDB query
+            cursor = self.collection.find(
+                {"chat_id": chat_id}
+            ).sort("timestamp", -1).limit(limit)
+            
+            results = await cursor.to_list(length=limit)
+            return results
 
         except Exception as e:
             logger.error(f"Error getting chat history: {e}")

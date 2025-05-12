@@ -47,3 +47,7 @@ qdrant_client>=1.14.2
 #torch
 torch>=2.1.0
 transformers>=4.51.3
+
+einops>=0.8.1
+huggingface-hub>=0.24.0
+sentence-transformers>=4.1.0

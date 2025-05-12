@@ -61,53 +61,58 @@ class VectorStoreManager:
             logger.error(f"Error initializing VectorStoreManager: {str(e)}", exc_info=True)
             raise
 
-    def search(self, query: str, n_results: int = 5, where: Optional[Dict] = None) -> List[Dict]:
+    def search(self, query: str, n_results: int = 10, where: Optional[Dict] = None, prefer_recent: bool = False, score_threshold: float = 0.8) -> List[Dict]:
         """Search for similar documents.
         
         Args:
             query (str): The search query
             n_results (int): Number of results to return
             where (Dict, optional): Where conditions for filtering (e.g., {"source": "twitter"})
+            order_by (str, optional): Field to order by. Can be:
+                - Simple field name (e.g., "timestamp" - defaults to desc)
+                - Field with order (e.g., "timestamp:desc" or "timestamp:asc")
+                - Multiple fields (e.g., "timestamp:desc,score:asc")
         """
         try:
-            logger.info(f"Searching with query: {query}, n_results: {n_results}, where: {where}")
-            
-            # Generate query embedding using embedder
+            raw_limit = max(n_results * 5, 100) if prefer_recent else n_results
+
             query_vector = self._embedder.embed_text(query)
             query_vector = query_vector / np.linalg.norm(query_vector)
             query_vector = query_vector.tolist()
-            
+
             filter_query = None
             if where:
                 filter_query = Filter(
-                    must=[
-                        FieldCondition(key=k, match=MatchValue(value=v))
-                        for k, v in where.items()
-                    ]
+                    must=[FieldCondition(key=k, match=MatchValue(value=v)) for k, v in where.items()]
                 )
 
             results = self._client.search(
                 collection_name=self._collection_name,
                 query_vector=query_vector,
-                limit=n_results,
-                query_filter=filter_query
+                limit=raw_limit,
+                query_filter=filter_query,
+                with_payload=True,
+                score_threshold=score_threshold
             )
 
-            formatted_results = []
-            for hit in results:
-                formatted_results.append({
+            formatted_results = [
+                {
                     "text": hit.payload.get("text", ""),
                     "metadata": hit.payload,
-                    "score": float(hit.score)
-                })
+                    "score": float(hit.score),
+                    "timestamp": hit.payload.get("timestamp", 0)
+                }
+                for hit in results
+            ]
 
-            logger.info(f"Found {len(formatted_results)} results")
-            return formatted_results
+            if prefer_recent:
+                formatted_results.sort(key=lambda x: x["timestamp"], reverse=True)
 
+            return formatted_results[:n_results]
         except Exception as e:
             logger.error(f"Error searching vector store: {str(e)}", exc_info=True)
             return []
-
+        
     def get_by_source(self, source: str, limit: int = 100) -> List[Dict]:
         """Get documents by source."""
         try:

@@ -10,3 +10,7 @@ TIMEOUT = 120  # seconds
 STREAM_TIMEOUT = 120  # seconds for streaming API
 MONGO_URI=os.getenv("MONGO_URI", "mongodb://localhost:27017")
 MONGO_DB=os.getenv("MONGO_DB", "cpx_dev")
+REDIS_HOST=os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT=os.getenv("REDIS_PORT", 6379)
+REDIS_PASSWORD=os.getenv("REDIS_PASSWORD", None)
+REDIS_DB=os.getenv("REDIS_DB", 0)
