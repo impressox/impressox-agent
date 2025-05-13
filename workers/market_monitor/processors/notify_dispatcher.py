@@ -4,6 +4,7 @@ import aiohttp
 import json
 from typing import Dict, Optional, List
 from datetime import datetime, timedelta
+import time
 
 from workers.market_monitor.shared.models import Notification, NotifyChannel
 from workers.market_monitor.shared.redis_utils import RedisClient
@@ -117,22 +118,46 @@ class NotifyDispatcher:
             return False  # Allow notification on error
 
     async def check_rate_limit(self, channel: NotifyChannel, user: str) -> bool:
-        """Check if user has exceeded rate limit for the channel"""
+        """Check if user has exceeded rate limit for the channel using basic Redis commands"""
         try:
             key = f"rate_limit:{channel.value}:{user}"
-            current = await self.redis.get(key)
+            now = int(time.time())
+            window_size = 60  # 1 minute window
+            max_messages = self.rate_limits[channel]["max_per_minute"]
             
-            if current and int(current) >= self.rate_limits[channel]["max_per_minute"]:
-                logger.warning(f"Rate limit exceeded for {user} on {channel}")
-                return False
-            
-            # Use setex to set value with expiry in one command
-            if not current:
-                await self.redis.set(key, "1", ex=60)  # 1 minute expiry
+            # Get all timestamps
+            timestamps = await self.redis.hgetall(key)
+            if timestamps:
+                # Convert to dict of int timestamps
+                timestamps = {k: int(v) for k, v in timestamps.items()}
+                
+                # Remove old messages
+                current_timestamps = {k: v for k, v in timestamps.items() if v > now - window_size}
+                
+                # Count messages in current window
+                message_count = len(current_timestamps)
+                
+                if message_count >= max_messages:
+                    logger.warning(f"Rate limit exceeded for {user} on {channel}: {message_count}/{max_messages} messages in last minute")
+                    return False
+                
+                # Update timestamps
+                if current_timestamps != timestamps:
+                    # Delete old key and create new one with current timestamps
+                    await self.redis.delete(key)
+                    if current_timestamps:
+                        await self.redis.hmset(key, current_timestamps)
             else:
-                await self.redis.set(key, str(int(current) + 1), ex=60)
+                message_count = 0
+            
+            # Add current message
+            await self.redis.hset(key, str(now), now)
+            
+            # Set expiry on the key (2x window size to be safe)
+            await self.redis.expire(key, window_size * 2)
             
             return True
+            
         except Exception as e:
             logger.error(f"Error checking rate limit: {e}")
             return False  # Deny notification on error to prevent spam

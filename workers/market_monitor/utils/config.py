@@ -180,17 +180,25 @@ class Config(BaseSettings):
                 "ethereum": {
                     "rpc_url": os.environ.get("ETH_RPC_URL", "https://eth-mainnet.g.alchemy.com/v2/YOUR-API-KEY"),
                     "ws_url": os.environ.get("ETH_WS_URL"),
-                    "chain_id": 1
+                    "chain_id": 1,
+                    "native_symbol": "ETH"
                 },
                 "bsc": {
                     "rpc_url": os.environ.get("BSC_RPC_URL", "https://bsc-dataseed.binance.org/"),
                     "ws_url": os.environ.get("BSC_WS_URL"),
-                    "chain_id": 56
+                    "chain_id": 56,
+                    "native_symbol": "BNB"
                 },
                 "base": {
                     "rpc_url": os.environ.get("BASE_RPC_URL", "https://mainnet.base.org"),
                     "ws_url": os.environ.get("BASE_WS_URL"),
-                    "chain_id": 8453
+                    "chain_id": 8453,
+                    "native_symbol": "ETH"
+                },
+                "solana": {
+                    "rpc_url": os.environ.get("SOL_RPC_URL", "https://api.mainnet-beta.solana.com"),
+                    "ws_url": os.environ.get("SOL_WS_URL"),
+                    "native_symbol": "SOL"
                 }
             },
             "settings": {
@@ -267,6 +275,10 @@ class Config(BaseSettings):
     def get_blockchain_settings(self) -> Dict[str, Any]:
         """Get blockchain settings"""
         return self.blockchain["settings"]
+
+    def get_native_symbol(self, chain: str) -> str:
+        """Get native token symbol for a specific chain"""
+        return self.blockchain["connection"][chain.lower()]["native_symbol"]
 
 def load_yaml_config(file_path: Path) -> Dict:
     """Load YAML configuration file"""

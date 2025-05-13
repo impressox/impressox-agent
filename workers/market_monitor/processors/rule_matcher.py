@@ -206,16 +206,62 @@ class RuleMatcher:
                         amount = m.get("amount", 0)
                         old_balance = m.get("old_balance", 0)
                         new_balance = m.get("new_balance", 0)
-                        msg = f"<b>{wallet}</b> received {amount} {chain.upper()} (balance: {old_balance} → {new_balance})"
+                        tx_hash = m.get("hash", "")
+                        scan_url = self.config.get_scan_url(chain)
+                        
+                        msg = f"🔔 <b>Native Transfer (Received)</b> on <b>{chain.upper()}</b>\n"
+                        msg += f"• From: <code>{m.get('from', 'Unknown')}</code> (<a href='{scan_url}/address/{m.get('from', 'Unknown')}'>View</a>)\n"
+                        msg += f"• To: <code>{m.get('to', 'Unknown')}</code> (<a href='{scan_url}/address/{m.get('to', 'Unknown')}'>View</a>)\n"
+                        msg += f"• Amount: {amount} {chain.upper()}\n"
+                        msg += f"• Balance: {old_balance} → {new_balance}\n"
+                        msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>"
                     elif activity_type == "native_transfer_out":
                         amount = m.get("amount", 0)
                         old_balance = m.get("old_balance", 0)
                         new_balance = m.get("new_balance", 0)
-                        msg = f"<b>{wallet}</b> sent {amount} {chain.upper()} (balance: {old_balance} → {new_balance})"
+                        tx_hash = m.get("hash", "")
+                        scan_url = self.config.get_scan_url(chain)
+                        
+                        msg = f"🔔 <b>Native Transfer (Sent)</b> on <b>{chain.upper()}</b>\n"
+                        msg += f"• From: <code>{m.get('from', 'Unknown')}</code> (<a href='{scan_url}/address/{m.get('from', 'Unknown')}'>View</a>)\n"
+                        msg += f"• To: <code>{m.get('to', 'Unknown')}</code> (<a href='{scan_url}/address/{m.get('to', 'Unknown')}'>View</a>)\n"
+                        msg += f"• Amount: {amount} {chain.upper()}\n"
+                        msg += f"• Balance: {old_balance} → {new_balance}\n"
+                        msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>"
                     elif activity_type == "token_transfer_in":
                         token = m.get("token", "Unknown")
-                        amount = m.get("amount", 0)
-                        msg = f"<b>{wallet}</b> received {amount} {token} on {chain.upper()}"
+                        token_name = m.get("token_name", "Unknown")
+                        token_symbol = m.get("token_symbol", "Unknown")
+                        amount = m.get("formatted_amount", m.get("amount", 0))
+                        from_address = m.get("from", "Unknown")
+                        to_address = m.get("to", "Unknown")
+                        tx_hash = m.get("hash", "")
+                        scan_url = self.config.get_scan_url(chain)
+                        
+                        msg = f"🔔 <b>Token Transfer (Received)</b> on <b>{chain.upper()}</b>\n"
+                        msg += f"• From: <a href='{scan_url}/address/{from_address}'>{from_address}</a>\n"
+                        msg += f"• To: <a href='{scan_url}/address/{to_address}'>{to_address}</a>\n"
+                        msg += f"• Type: ERC-20\n"
+                        msg += f"• Token: <code>{token}</code> (<a href='{scan_url}/token/{token}'>View</a>)\n"
+                        msg += f"• Amount: {amount} {token_symbol} ({token_name})\n"
+                        msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>"
+                    elif activity_type == "token_transfer_out":
+                        token = m.get("token", "Unknown")
+                        token_name = m.get("token_name", "Unknown")
+                        token_symbol = m.get("token_symbol", "Unknown")
+                        amount = m.get("formatted_amount", m.get("amount", 0))
+                        from_address = m.get("from", "Unknown")
+                        to_address = m.get("to", "Unknown")
+                        tx_hash = m.get("hash", "")
+                        scan_url = self.config.get_scan_url(chain)
+                        
+                        msg = f"🔔 <b>Token Transfer (Sent)</b> on <b>{chain.upper()}</b>\n"
+                        msg += f"• From: <a href='{scan_url}/address/{from_address}'>{from_address}</a>\n"
+                        msg += f"• To: <a href='{scan_url}/address/{to_address}'>{to_address}</a>\n"
+                        msg += f"• Type: ERC-20\n"
+                        msg += f"• Token: <code>{token}</code> (<a href='{scan_url}/token/{token}'>View</a>)\n"
+                        msg += f"• Amount: {amount} {token_symbol} ({token_name})\n"
+                        msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>"
                     elif activity_type == "nft_transfer_in":
                         collection = m.get("collection", "Unknown")
                         token_id = m.get("token_id", "Unknown")
@@ -224,15 +270,29 @@ class RuleMatcher:
                         msg = f"<b>{wallet}</b> received {amount} {standard} NFT #{token_id} from {collection} on {chain.upper()}"
                     elif activity_type == "token_trade":
                         token_in = m.get("token_in", "Unknown")
+                        token_in_name = m.get("token_in_name", "Unknown")
+                        token_in_symbol = m.get("token_in_symbol", "Unknown")
                         token_out = m.get("token_out", "Unknown")
-                        amount_in = m.get("amount_in", "N/A")
-                        amount_out = m.get("amount_out", "N/A")
-                        tx_hash = m.get("tx_hash", "")
+                        token_out_name = m.get("token_out_name", "Unknown")
+                        token_out_symbol = m.get("token_out_symbol", "Unknown")
+                        amount_in = m.get("formatted_amount_in", m.get("amount_in", "N/A"))
+                        amount_out = m.get("formatted_amount_out", m.get("amount_out", "N/A"))
+                        tx_hash = m.get("hash", "")
                         scan_url = self.config.get_scan_url(chain)
-                        msg = f"<b>{wallet}</b> on {chain.upper()}\n"
-                        msg += f"🔸 Spent: {amount_in} {token_in}\n"
-                        msg += f"🔸 Received: {amount_out} {token_out}\n"
-                        msg += f"🔸 TX: <a href='{scan_url}{tx_hash}'>{tx_hash}</a>"
+                        wallet = m.get("wallet", "Unknown")
+                        
+                        if token_out == "native":
+                            msg = f"🔔 <b>Token Trade (Sold)</b> on <b>{chain.upper()}</b>\n"
+                            msg += f"• Wallet: <a href='{scan_url}/address/{wallet}'>{wallet}</a>\n"
+                            msg += f"• Sold: {amount_in} {token_in_symbol} ({token_in_name})\n"
+                            msg += f"• Received: {amount_out} {token_out_symbol}\n"
+                            msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>"
+                        else:
+                            msg = f"🔔 <b>Token Trade (Swapped)</b> on <b>{chain.upper()}</b>\n"
+                            msg += f"• Wallet: <a href='{scan_url}/address/{wallet}'>{wallet}</a>\n"
+                            msg += f"• Sold: {amount_in} {token_in_symbol} ({token_in_name})\n"
+                            msg += f"• Bought: {amount_out} {token_out_symbol} ({token_out_name})\n"
+                            msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>"
                     elif activity_type == "nft_trade":
                         collection = m.get("collection", "Unknown")
                         token_id = m.get("token_id", "Unknown")

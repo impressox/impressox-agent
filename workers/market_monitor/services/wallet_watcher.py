@@ -12,6 +12,7 @@ from eth_utils import to_checksum_address, is_address
 import base58
 from solana.rpc.async_api import AsyncClient
 from solana.rpc.commitment import Confirmed
+import time
 
 from workers.market_monitor.services.base import BaseWatcher
 from workers.market_monitor.shared.models import Rule
@@ -134,16 +135,61 @@ class WalletWatcher(BaseWatcher):
         self.balance_cache = {}  # Cache wallet balances per chain
         self.tx_cache = {}  # Cache recent transactions per chain
         self.watch_type = "wallet"
-        self.watch_interval = 10  # Check more frequently for wallets
+        self.watch_interval = 1  # Check more frequently for wallets
         self.evm_chains = [Chain.ETHEREUM, Chain.BSC, Chain.BASE]
         self.solana_chain = Chain.SOLANA
         self.block_cache = {}  # Cache latest block numbers per chain
         self.wallet_types = {}  # Cache wallet types
+        self.token_cache = {}  # Cache token metadata
         
         # Pre-compute event topics
         self.token_transfer_topic = '0x' + Web3.keccak(text='Transfer(address,address,uint256)').hex()
         self.erc1155_single_topic = '0x' + Web3.keccak(text='TransferSingle(address,address,address,uint256,uint256)').hex()
         self.erc1155_batch_topic = '0x' + Web3.keccak(text='TransferBatch(address,address,address,uint256[],uint256[])').hex()
+        
+        # Common DEX router addresses
+        self.dex_routers = {
+            'ethereum': [
+                '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D',  # Uniswap V2
+                '0xE592427A0AEce92De3Edee1F18E0157C05861564',  # Uniswap V3
+                '0x1111111254EEB25477B68fb85Ed929f73A960582',  # 1inch
+                '0xDef1C0ded9bec7F1a1670819833240f027b25EfF'   # 0x Protocol
+            ],
+            'bsc': [
+                '0x10ED43C718714eb63d5aA57B78B54704E256024E',  # PancakeSwap V2
+                '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4',  # PancakeSwap V3
+                '0x1111111254EEB25477B68fb85Ed929f73A960582'   # 1inch
+            ],
+            'base': [
+                '0x327Df1E6de05895d2ab08513aaDD9313Fe505D86',  # BaseSwap
+                '0x1111111254EEB25477B68fb85Ed929f73A960582'   # 1inch
+            ]
+        }
+
+        # ERC20 ABI for token metadata
+        self.erc20_abi = [
+            {
+                "constant": True,
+                "inputs": [],
+                "name": "name",
+                "outputs": [{"name": "", "type": "string"}],
+                "type": "function"
+            },
+            {
+                "constant": True,
+                "inputs": [],
+                "name": "symbol",
+                "outputs": [{"name": "", "type": "string"}],
+                "type": "function"
+            },
+            {
+                "constant": True,
+                "inputs": [],
+                "name": "decimals",
+                "outputs": [{"name": "", "type": "uint8"}],
+                "type": "function"
+            }
+        ]
 
     async def watch_targets(self):
         """Watch wallet activities across multiple chains"""
@@ -360,7 +406,7 @@ class WalletWatcher(BaseWatcher):
                     logs = filtered_logs
                     
                     # Process logs
-                    transactions = self._process_wallet_logs(logs, wallet)
+                    transactions = self._process_wallet_logs(logs, wallet, chain.value)
                     
                     result[wallet] = {
                         'chain': chain.value,
@@ -471,95 +517,458 @@ class WalletWatcher(BaseWatcher):
                 self.balance_cache[cache_key] = current_balance
                 balance_change = current_balance - prev_balance
 
-                # Check native token transfers
-                if balance_change > 0:
-                    matches.append({
-                        "wallet": wallet,
-                        "chain": chain,
-                        "activity_type": ActivityType.NATIVE_TRANSFER_IN.value,
-                        "amount": balance_change,
-                        "old_balance": prev_balance,
-                        "new_balance": current_balance,
-                        "timestamp": datetime.utcnow().isoformat()
-                    })
-                elif balance_change < 0:
-                    matches.append({
-                        "wallet": wallet,
-                        "chain": chain,
-                        "activity_type": ActivityType.NATIVE_TRANSFER_OUT.value,
-                        "amount": abs(balance_change),
-                        "old_balance": prev_balance,
-                        "new_balance": current_balance,
-                        "timestamp": datetime.utcnow().isoformat()
-                    })
-
                 # Process transactions
+                tx_matches = {}  # Group transactions by hash
                 for tx in transactions:
-                    tx_hash = tx['hash']
+                    tx_hash = tx.get('hash')
+                    if not tx_hash:
+                        continue
+                        
                     cache_key = f"{chain}:{tx_hash}"
+                    if cache_key in self.tx_cache:
+                        continue
+                        
+                    self.tx_cache[cache_key] = True
                     
-                    if cache_key not in self.tx_cache:
-                        self.tx_cache[cache_key] = True
-                        
-                        if tx['type'] == 'token_transfer':
-                            if tx['to'].lower() == wallet.lower():  # Only track incoming transfers
+                    if tx_hash not in tx_matches:
+                        tx_matches[tx_hash] = {
+                            'wallet': wallet,
+                            'chain': chain,
+                            'hash': tx_hash,
+                            'block_number': tx.get('block_number'),
+                            'timestamp': datetime.utcnow().isoformat(),
+                            'transfers': [],
+                            'balance_change': balance_change  # Add balance change to transaction data
+                        }
+                    
+                    if tx['type'] == 'token_transfer':
+                        tx_matches[tx_hash]['transfers'].append({
+                            'type': 'token_transfer',
+                            'activity_type': tx.get('activity_type', 'token_transfer_in'),
+                            'token': tx.get('token'),
+                            'token_name': tx.get('token_name'),
+                            'token_symbol': tx.get('token_symbol'),
+                            'amount': tx.get('value'),
+                            'formatted_amount': tx.get('formatted_amount'),
+                            'from': tx.get('from'),
+                            'to': tx.get('to')
+                        })
+                    elif tx['type'] == 'native_transfer':
+                        tx_matches[tx_hash]['transfers'].append({
+                            'type': 'native_transfer',
+                            'activity_type': tx.get('activity_type'),
+                            'amount': tx.get('value'),
+                            'formatted_amount': tx.get('formatted_amount'),
+                            'from': tx.get('from'),
+                            'to': tx.get('to')
+                        })
+                    elif tx['type'] == 'token_trade':
+                        matches.append({
+                            'wallet': wallet,
+                            'chain': chain,
+                            'activity_type': 'token_trade',
+                            'token_in': tx.get('token_in'),
+                            'token_in_name': tx.get('token_in_name'),
+                            'token_in_symbol': tx.get('token_in_symbol'),
+                            'amount_in': tx.get('amount_in'),
+                            'formatted_amount_in': tx.get('formatted_amount_in'),
+                            'token_out': tx.get('token_out'),
+                            'token_out_name': tx.get('token_out_name'),
+                            'token_out_symbol': tx.get('token_out_symbol'),
+                            'amount_out': tx.get('amount_out'),
+                            'formatted_amount_out': tx.get('formatted_amount_out'),
+                            'hash': tx_hash,
+                            'block_number': tx.get('block_number'),
+                            'timestamp': datetime.utcnow().isoformat()
+                        })
+
+                # Process grouped transactions
+                for tx_hash, tx_data in tx_matches.items():
+                    transfers = tx_data['transfers']
+                    balance_change = tx_data['balance_change']
+                    
+                    # Check for token purchase/sell
+                    token_transfer = None
+                    
+                    for transfer in transfers:
+                        if transfer['type'] == 'token_transfer':
+                            token_transfer = transfer
+                            break
+                    
+                    if token_transfer:
+                        if balance_change < 0 and token_transfer['activity_type'] == 'token_transfer_in':
+                            # This is a token purchase (native token sent, token received)
+                            matches.append({
+                                'wallet': tx_data['wallet'],
+                                'chain': tx_data['chain'],
+                                'activity_type': 'token_trade',
+                                'token_in': 'native',
+                                'token_in_name': tx_data['chain'].upper(),
+                                'token_in_symbol': self.config.get_native_symbol(tx_data['chain']),
+                                'amount_in': abs(balance_change),
+                                'formatted_amount_in': str(abs(balance_change)),
+                                'token_out': token_transfer['token'],
+                                'token_out_name': token_transfer['token_name'],
+                                'token_out_symbol': token_transfer['token_symbol'],
+                                'amount_out': token_transfer['amount'],
+                                'formatted_amount_out': token_transfer['formatted_amount'],
+                                'hash': tx_hash,
+                                'block_number': tx_data['block_number'],
+                                'timestamp': tx_data['timestamp']
+                            })
+                        elif balance_change > 0 and token_transfer['activity_type'] == 'token_transfer_out':
+                            # This is a token sell (token sent, native token received)
+                            matches.append({
+                                'wallet': tx_data['wallet'],
+                                'chain': tx_data['chain'],
+                                'activity_type': 'token_trade',
+                                'token_in': token_transfer['token'],
+                                'token_in_name': token_transfer['token_name'],
+                                'token_in_symbol': token_transfer['token_symbol'],
+                                'amount_in': token_transfer['amount'],
+                                'formatted_amount_in': token_transfer['formatted_amount'],
+                                'token_out': 'native',
+                                'token_out_name': tx_data['chain'].upper(),
+                                'token_out_symbol': self.config.get_native_symbol(tx_data['chain']),
+                                'amount_out': balance_change,
+                                'formatted_amount_out': str(balance_change),
+                                'hash': tx_hash,
+                                'block_number': tx_data['block_number'],
+                                'timestamp': tx_data['timestamp']
+                            })
+                        else:
+                            # Regular token transfer
+                            matches.append({
+                                'wallet': tx_data['wallet'],
+                                'chain': tx_data['chain'],
+                                'activity_type': token_transfer['activity_type'],
+                                'token': token_transfer['token'],
+                                'token_name': token_transfer['token_name'],
+                                'token_symbol': token_transfer['token_symbol'],
+                                'amount': token_transfer['amount'],
+                                'formatted_amount': token_transfer['formatted_amount'],
+                                'from': token_transfer['from'],
+                                'to': token_transfer['to'],
+                                'hash': tx_hash,
+                                'block_number': tx_data['block_number'],
+                                'timestamp': tx_data['timestamp']
+                            })
+                    else:
+                        # Add native transfers
+                        for transfer in transfers:
+                            if transfer['type'] == 'native_transfer':
                                 matches.append({
-                                    "wallet": wallet,
-                                    "chain": chain,
-                                    "activity_type": ActivityType.TOKEN_TRANSFER_IN.value,
-                                    "token": tx['token'],
-                                    "amount": tx['value'],
-                                    "tx_hash": tx_hash,
-                                    "block_number": tx['block_number'],
-                                    "timestamp": datetime.utcnow().isoformat()
-                                })
-                        
-                        elif tx['type'] == 'nft_transfer':
-                            if tx['to'].lower() == wallet.lower():  # Only track incoming transfers
-                                matches.append({
-                                    "wallet": wallet,
-                                    "chain": chain,
-                                    "activity_type": ActivityType.NFT_TRANSFER_IN.value,
-                                    "standard": tx['standard'],
-                                    "collection": tx['collection'],
-                                    "token_id": tx['token_id'],
-                                    "amount": tx.get('amount', 1),  # Default to 1 for ERC721
-                                    "tx_hash": tx_hash,
-                                    "block_number": tx['block_number'],
-                                    "timestamp": datetime.utcnow().isoformat()
+                                    'wallet': tx_data['wallet'],
+                                    'chain': tx_data['chain'],
+                                    'activity_type': transfer['activity_type'],
+                                    'amount': transfer['amount'],
+                                    'formatted_amount': transfer['formatted_amount'],
+                                    'from': transfer['from'],
+                                    'to': transfer['to'],
+                                    'hash': tx_hash,
+                                    'block_number': tx_data['block_number'],
+                                    'timestamp': tx_data['timestamp']
                                 })
 
         if matches:
             logger.info(f"[WalletWatcher] Found {len(matches)} matches for rule {rule.rule_id}")
         return matches
 
-    def _process_wallet_logs(self, logs: List[Dict], wallet: str) -> List[Dict]:
+    def _process_wallet_logs(self, logs: List[Dict], wallet: str, chain: str) -> List[Dict]:
         """Process all logs for a wallet"""
         transactions = []
+        tx_logs = {}  # Group logs by transaction hash
+        
+        # Group logs by transaction hash
         for log in logs:
             try:
-                # Skip if already processed
-                tx_hash = log['transactionHash']  # Already hex string from RPC
+                tx_hash = log['transactionHash']
+                if tx_hash not in tx_logs:
+                    tx_logs[tx_hash] = []
+                tx_logs[tx_hash].append(log)
+            except Exception as e:
+                logger.error(f"[WalletWatcher] Error grouping logs: {e}", exc_info=True)
+                continue
+
+        # Process each transaction's logs
+        for tx_hash, tx_logs_list in tx_logs.items():
+            try:
                 if tx_hash in self.tx_cache:
                     continue
+
+                # Check if this is a DEX swap
+                is_swap = False
+                token_in = None
+                token_out = None
+                amount_in = None
+                amount_out = None
+                native_sent = None
+                token_received = None
+                
+                # Check if transaction involves a DEX router
+                for log in tx_logs_list:
+                    if log['address'].lower() in [r.lower() for r in self.dex_routers.get(chain, [])]:
+                        is_swap = True
+                        break
+
+                if is_swap:
+                    # Process swap logs
+                    for log in tx_logs_list:
+                        if log['topics'][0] == self.token_transfer_topic:
+                            from_address = '0x' + log['topics'][1][-40:]
+                            to_address = '0x' + log['topics'][2][-40:]
+                            
+                            # Get token metadata
+                            w3 = Web3(Web3.HTTPProvider(self.config.get_rpc_url(chain)))
+                            token_metadata = self._get_token_metadata(w3, log['address'], chain)
+                            
+                            # Convert data to hex string if needed
+                            data = log['data']
+                            if not data.startswith('0x'):
+                                data = '0x' + data
+                            value = int(data, 16)
+                            formatted_amount = self._format_token_amount(value, token_metadata['decimals'])
+                            
+                            # Determine if this is input or output token
+                            if from_address.lower() == wallet.lower():
+                                # Token being sold
+                                token_in = {
+                                    'address': log['address'],
+                                    'name': token_metadata['name'],
+                                    'symbol': token_metadata['symbol'],
+                                    'amount': value,
+                                    'formatted_amount': formatted_amount
+                                }
+                            elif to_address.lower() == wallet.lower():
+                                # Token being bought
+                                token_out = {
+                                    'address': log['address'],
+                                    'name': token_metadata['name'],
+                                    'symbol': token_metadata['symbol'],
+                                    'amount': value,
+                                    'formatted_amount': formatted_amount
+                                }
                     
-                # Process based on topic
-                if log['topics'][0] == self.token_transfer_topic:
-                    tx = self._process_token_transfer(log, wallet)
-                    if tx:
-                        transactions.append(tx)
+                    # Check if this is a token to native swap
+                    if token_in and not token_out:
+                        # This is a token to native swap
+                        transactions.append({
+                            'type': 'token_trade',
+                            'hash': tx_hash,
+                            'wallet': wallet,
+                            'token_in': token_in['address'],
+                            'token_in_name': token_in['name'],
+                            'token_in_symbol': token_in['symbol'],
+                            'amount_in': token_in['amount'],
+                            'formatted_amount_in': token_in['formatted_amount'],
+                            'token_out': 'native',
+                            'token_out_name': chain.upper(),
+                            'token_out_symbol': self.config.get_native_symbol(chain),
+                            'block_number': int(tx_logs_list[0]['blockNumber'], 16),
+                            'chain': chain
+                        })
                         self.tx_cache[tx_hash] = True
-                elif log['topics'][0] in [self.erc1155_single_topic, self.erc1155_batch_topic]:
-                    tx = self._process_erc1155_transfer(log, wallet)
-                    if tx:
-                        transactions.append(tx)
+                    elif not token_in and token_out:
+                        # This is a native to token swap
+                        transactions.append({
+                            'type': 'token_trade',
+                            'hash': tx_hash,
+                            'wallet': wallet,
+                            'token_in': 'native',
+                            'token_in_name': chain.upper(),
+                            'token_in_symbol': self.config.get_native_symbol(chain),
+                            'amount_in': native_sent['amount'] if native_sent else 0,
+                            'formatted_amount_in': native_sent['formatted_amount'] if native_sent else '0',
+                            'token_out': token_out['address'],
+                            'token_out_name': token_out['name'],
+                            'token_out_symbol': token_out['symbol'],
+                            'amount_out': token_out['amount'],
+                            'formatted_amount_out': token_out['formatted_amount'],
+                            'block_number': int(tx_logs_list[0]['blockNumber'], 16),
+                            'chain': chain
+                        })
                         self.tx_cache[tx_hash] = True
+                else:
+                    # Process regular token transfers
+                    native_transfer = None
+                    token_transfer = None
+                    
+                    for log in tx_logs_list:
+                        if log['topics'][0] == self.token_transfer_topic:
+                            tx = self._process_token_transfer(log, wallet, chain)
+                            if tx:
+                                if tx['activity_type'] == 'token_transfer_in':
+                                    token_transfer = tx
+                                else:
+                                    transactions.append(tx)
+                        elif log['topics'][0] in [self.erc1155_single_topic, self.erc1155_batch_topic]:
+                            tx = self._process_erc1155_transfer(log, wallet)
+                            if tx:
+                                transactions.append(tx)
+                    
+                    # Check if this is a native token transfer
+                    for log in tx_logs_list:
+                        if 'value' in log and log['value'] != '0x0':
+                            from_address = '0x' + log['topics'][1][-40:] if len(log['topics']) > 1 else None
+                            to_address = '0x' + log['topics'][2][-40:] if len(log['topics']) > 2 else None
+                            
+                            if from_address and to_address:
+                                if from_address.lower() == wallet.lower():
+                                    native_transfer = {
+                                        'type': 'native_transfer',
+                                        'activity_type': 'native_transfer_out',
+                                        'hash': log['transactionHash'],
+                                        'from': from_address,
+                                        'to': to_address,
+                                        'value': int(log['value'], 16),
+                                        'formatted_amount': self._format_token_amount(int(log['value'], 16), 18),
+                                        'block_number': int(log['blockNumber'], 16),
+                                        'chain': chain,
+                                        'token_symbol': self.config.get_native_symbol(chain)
+                                    }
+                    
+                    # If we have both native transfer out and token transfer in, it's likely a purchase
+                    if native_transfer and token_transfer and native_transfer['activity_type'] == 'native_transfer_out' and token_transfer['activity_type'] == 'token_transfer_in':
+                        transactions.append({
+                            'type': 'token_trade',
+                            'hash': tx_hash,
+                            'wallet': wallet,
+                            'token_in': 'native',
+                            'token_in_name': chain.upper(),
+                            'token_in_symbol': self.config.get_native_symbol(chain),
+                            'amount_in': native_transfer['value'],
+                            'formatted_amount_in': native_transfer['formatted_amount'],
+                            'token_out': token_transfer['token'],
+                            'token_out_name': token_transfer['token_name'],
+                            'token_out_symbol': token_transfer['token_symbol'],
+                            'amount_out': token_transfer['value'],
+                            'formatted_amount_out': token_transfer['formatted_amount'],
+                            'block_number': int(tx_logs_list[0]['blockNumber'], 16),
+                            'chain': chain
+                        })
+                        self.tx_cache[tx_hash] = True
+                    else:
+                        # Add individual transfers if not part of a trade
+                        if native_transfer:
+                            transactions.append(native_transfer)
+                        if token_transfer:
+                            transactions.append(token_transfer)
+
             except Exception as e:
-                logger.error(f"[WalletWatcher] Error processing log: {e}", exc_info=True)
+                logger.error(f"[WalletWatcher] Error processing transaction logs: {e}", exc_info=True)
                 continue
+
         return transactions
 
-    def _process_token_transfer(self, log: Dict, wallet: str) -> Optional[Dict]:
+    def _get_token_metadata(self, w3: Web3, token_address: str, chain: str) -> Dict:
+        """Get token metadata (name, symbol, decimals)"""
+        try:
+            # Convert to checksum address
+            token_address = Web3.to_checksum_address(token_address)
+            logger.info(f"[WalletWatcher] Getting metadata for {token_address} on {chain}")
+            # Check cache first with chain-specific key
+            cache_key = f"{chain}:{token_address}"
+            if cache_key in self.token_cache:
+                logger.info(f"[WalletWatcher] Using cached metadata for {token_address} on {chain}")
+                return self.token_cache[cache_key]
+
+            # Ensure we're using the correct chain's RPC
+            rpc_url = self.config.get_rpc_url(chain)
+            if w3.provider.endpoint_uri != rpc_url:
+                logger.info(f"[WalletWatcher] Switching to {chain} RPC for {token_address}")
+                w3 = Web3(Web3.HTTPProvider(rpc_url))
+
+            # Create contract instance
+            contract = w3.eth.contract(address=token_address, abi=self.erc20_abi)
+            
+            # Get metadata with retries
+            max_retries = 3
+            retry_delay = 1
+            
+            for attempt in range(max_retries):
+                try:
+                    # Get name
+                    try:
+                        name = contract.functions.name().call()
+                        if not name or name == "Unknown":
+                            name = f"Token-{token_address[:8]}"
+                    except Exception as e:
+                        logger.warning(f"[WalletWatcher] Error getting name for {token_address} on {chain}: {e}")
+                        name = f"Token-{token_address[:8]}"
+                    
+                    # Get symbol
+                    try:
+                        symbol = contract.functions.symbol().call()
+                        if not symbol or symbol == "Unknown":
+                            symbol = f"TKN-{token_address[:4]}"
+                    except Exception as e:
+                        logger.warning(f"[WalletWatcher] Error getting symbol for {token_address} on {chain}: {e}")
+                        symbol = f"TKN-{token_address[:4]}"
+                    
+                    # Get decimals
+                    try:
+                        decimals = contract.functions.decimals().call()
+                        if decimals is None:
+                            decimals = 18
+                    except Exception as e:
+                        logger.warning(f"[WalletWatcher] Error getting decimals for {token_address} on {chain}: {e}")
+                        decimals = 18
+                    
+                    metadata = {
+                        "name": name,
+                        "symbol": symbol,
+                        "decimals": decimals
+                    }
+                    
+                    # Cache the result with chain-specific key
+                    self.token_cache[cache_key] = metadata
+                    logger.info(f"[WalletWatcher] Cached metadata for {token_address} on {chain}: {metadata}")
+                    return metadata
+                    
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"[WalletWatcher] Retry {attempt + 1}/{max_retries} for {token_address} on {chain}: {e}")
+                        time.sleep(retry_delay)
+                    else:
+                        raise
+            
+            # If all retries failed, return default metadata
+            metadata = {
+                "name": f"Token-{token_address[:8]}",
+                "symbol": f"TKN-{token_address[:4]}",
+                "decimals": 18
+            }
+            
+            # Cache the default metadata
+            self.token_cache[cache_key] = metadata
+            logger.warning(f"[WalletWatcher] Using default metadata for {token_address} on {chain}")
+            return metadata
+            
+        except Exception as e:
+            logger.error(f"[WalletWatcher] Error getting token metadata for {token_address} on {chain}: {e}", exc_info=True)
+            # Return default metadata on error
+            return {
+                "name": f"Token-{token_address[:8]}",
+                "symbol": f"TKN-{token_address[:4]}",
+                "decimals": 18
+            }
+
+    def _format_token_amount(self, amount: int, decimals: int) -> str:
+        """Format token amount with proper decimals"""
+        try:
+            if decimals == 0:
+                return str(amount)
+            amount_str = str(amount).zfill(decimals + 1)
+            decimal_point = len(amount_str) - decimals
+            formatted = amount_str[:decimal_point] + "." + amount_str[decimal_point:]
+            # Remove trailing zeros
+            formatted = formatted.rstrip('0').rstrip('.')
+            return formatted
+        except Exception as e:
+            logger.error(f"[WalletWatcher] Error formatting amount {amount} with decimals {decimals}: {e}", exc_info=True)
+            return str(amount)
+
+    def _process_token_transfer(self, log: Dict, wallet: str, chain: str) -> Optional[Dict]:
         """Process ERC20 token transfer log"""
         try:
             if len(log['topics']) < 3:
@@ -583,14 +992,30 @@ class WalletWatcher(BaseWatcher):
                 
             value = int(data, 16)
             
+            # Get token metadata from correct chain
+            w3 = Web3(Web3.HTTPProvider(self.config.get_rpc_url(chain)))
+            token_metadata = self._get_token_metadata(w3, log['address'], chain)
+            
+            # Format amount with proper decimals
+            formatted_amount = self._format_token_amount(value, token_metadata['decimals'])
+            
+            # Determine activity type based on wallet address
+            activity_type = 'token_transfer_in' if to_address.lower() == wallet.lower() else 'token_transfer_out'
+            
             return {
                 'type': 'token_transfer',
+                'activity_type': activity_type,
                 'hash': log['transactionHash'],  # Already hex string
                 'token': log['address'],
+                'token_name': token_metadata['name'],
+                'token_symbol': token_metadata['symbol'],
                 'from': from_address,
                 'to': to_address,
                 'value': value,
-                'block_number': int(log['blockNumber'], 16)  # Convert hex to int
+                'formatted_amount': formatted_amount,
+                'block_number': int(log['blockNumber'], 16),  # Convert hex to int
+                'chain': chain,
+                'wallet': wallet  # Add wallet address for matcher
             }
         except Exception as e:
             logger.error(f"[WalletWatcher] Error processing token transfer: {e}", exc_info=True)
