@@ -203,7 +203,7 @@ class AirdropWatcher(BaseWatcher):
             logger.error(f"[AirdropWatcher] Error fetching airdrop data: {e}", exc_info=True)
             return {}
 
-    async def evaluate_conditions(self, rule: Rule, airdrop_data: Dict) -> List[Dict]:
+    def evaluate_conditions(self, rule: Rule, airdrop_data: Dict) -> List[Dict]:
         """Evaluate rule conditions against airdrop data"""
         matches = []
         condition = rule.condition or {"type": "any"}

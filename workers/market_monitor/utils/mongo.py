@@ -7,16 +7,19 @@ from bson import ObjectId
 import json
 from datetime import datetime
 from workers.market_monitor.utils.config import get_config
+from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
 class MongoJSONEncoder(json.JSONEncoder):
-    """Custom JSON encoder for MongoDB documents"""
-    def default(self, obj: Any) -> Any:
-        if isinstance(obj, datetime):
-            return obj.isoformat()
+    """Custom JSON encoder for MongoDB objects"""
+    def default(self, obj):
         if isinstance(obj, ObjectId):
             return str(obj)
+        if isinstance(obj, Decimal):
+            return float(obj)
+        if isinstance(obj, datetime):
+            return obj.isoformat()
         return super().default(obj)
 
 class MongoClient:

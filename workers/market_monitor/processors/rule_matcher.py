@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 from workers.market_monitor.shared.models import Rule, RuleMatch, Notification
 from workers.market_monitor.shared.redis_utils import RedisClient
 from workers.market_monitor.utils.mongo import MongoJSONEncoder
+from workers.market_monitor.utils.config import get_config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -14,6 +15,7 @@ class RuleMatcher:
     def __init__(self):
         self.redis = None
         self.watch_types = ["market", "wallet", "airdrop"]  # List of supported watch types
+        self.config = get_config()
 
     async def start(self):
         """Start the rule matcher processor"""
@@ -168,6 +170,7 @@ class RuleMatcher:
             messages = []
             for m in matches:
                 condition = m.get("condition")
+                msg = None  # Initialize msg variable
                 
                 if watch_type == "market":
                     token = m["token"]
@@ -196,25 +199,63 @@ class RuleMatcher:
                 
                 elif watch_type == "wallet":
                     wallet = m["wallet"]
-                    if condition == "balance_below":
-                        current_balance = m["value"]
-                        msg = f"<b>{wallet}</b> balance below {m['threshold']} (current: {current_balance})"
-                    elif condition == "balance_change":
-                        change = m["value"]
-                        old_balance = m["old_balance"]
-                        new_balance = m["new_balance"]
-                        direction = "increased" if change > 0 else "decreased"
-                        msg = f"<b>{wallet}</b> balance {direction} by {abs(change)} (from {old_balance} → {new_balance})"
-                    elif condition == "token_transfer":
-                        token = m["token"]
-                        amount = m["amount"]
-                        direction = m["direction"]
-                        msg = f"<b>{wallet}</b> {direction} {amount} {token}"
-                    elif condition == "nft_transfer":
-                        collection = m["collection"]
-                        token_id = m["token_id"]
-                        direction = m["direction"]
-                        msg = f"<b>{wallet}</b> {direction} NFT {token_id} from {collection}"
+                    chain = m.get("chain", "ethereum")
+                    activity_type = m.get("activity_type")
+                    
+                    if activity_type == "native_transfer_in":
+                        amount = m.get("amount", 0)
+                        old_balance = m.get("old_balance", 0)
+                        new_balance = m.get("new_balance", 0)
+                        msg = f"<b>{wallet}</b> received {amount} {chain.upper()} (balance: {old_balance} → {new_balance})"
+                    elif activity_type == "native_transfer_out":
+                        amount = m.get("amount", 0)
+                        old_balance = m.get("old_balance", 0)
+                        new_balance = m.get("new_balance", 0)
+                        msg = f"<b>{wallet}</b> sent {amount} {chain.upper()} (balance: {old_balance} → {new_balance})"
+                    elif activity_type == "token_transfer_in":
+                        token = m.get("token", "Unknown")
+                        amount = m.get("amount", 0)
+                        msg = f"<b>{wallet}</b> received {amount} {token} on {chain.upper()}"
+                    elif activity_type == "nft_transfer_in":
+                        collection = m.get("collection", "Unknown")
+                        token_id = m.get("token_id", "Unknown")
+                        standard = m.get("standard", "ERC721")
+                        amount = m.get("amount", 1)
+                        msg = f"<b>{wallet}</b> received {amount} {standard} NFT #{token_id} from {collection} on {chain.upper()}"
+                    elif activity_type == "token_trade":
+                        token_in = m.get("token_in", "Unknown")
+                        token_out = m.get("token_out", "Unknown")
+                        amount_in = m.get("amount_in", "N/A")
+                        amount_out = m.get("amount_out", "N/A")
+                        tx_hash = m.get("tx_hash", "")
+                        scan_url = self.config.get_scan_url(chain)
+                        msg = f"<b>{wallet}</b> on {chain.upper()}\n"
+                        msg += f"🔸 Spent: {amount_in} {token_in}\n"
+                        msg += f"🔸 Received: {amount_out} {token_out}\n"
+                        msg += f"🔸 TX: <a href='{scan_url}{tx_hash}'>{tx_hash}</a>"
+                    elif activity_type == "nft_trade":
+                        collection = m.get("collection", "Unknown")
+                        token_id = m.get("token_id", "Unknown")
+                        token_amount = m.get("token_amount", "N/A")
+                        token_symbol = m.get("token_symbol", "Unknown")
+                        tx_hash = m.get("tx_hash", "")
+                        scan_url = self.config.get_scan_url(chain)
+                        msg = f"<b>{wallet}</b> on {chain.upper()}\n"
+                        msg += f"🔸 NFT: {collection} #{token_id}\n"
+                        msg += f"🔸 Amount: {token_amount} {token_symbol}\n"
+                        msg += f"🔸 TX: <a href='{scan_url}{tx_hash}'>{tx_hash}</a>"
+                    elif activity_type == "solana_transfer":
+                        amount = m.get("amount", "N/A")
+                        fee = m.get("fee", "N/A")
+                        tx_hash = m.get("tx_hash", "")
+                        scan_url = self.config.get_scan_url(chain)
+                        msg = f"<b>{wallet}</b> on {chain.upper()}\n"
+                        msg += f"🔸 Amount: {amount} SOL\n"
+                        msg += f"🔸 Fee: {fee} SOL\n"
+                        msg += f"🔸 TX: <a href='{scan_url}{tx_hash}'>{tx_hash}</a>"
+                    else:
+                        # Default message for unknown activity type
+                        msg = f"<b>{wallet}</b> on {chain.upper()}: {activity_type}"
                 
                 elif watch_type == "airdrop":
                     project = m["project"]
@@ -231,9 +272,11 @@ class RuleMatcher:
                     if not msg:
                         continue
                 else:
+                    # Skip if no message was generated
                     continue
 
-                messages.append(msg)
+                if msg:  # Only add non-empty messages
+                    messages.append(msg)
 
             if not messages:
                 return None
@@ -251,7 +294,7 @@ class RuleMatcher:
             )
 
         except Exception as e:
-            logger.error(f"Error creating notification: {e}")
+            logger.error(f"Error creating notification: {e}", exc_info=True)
             return None
 
     async def close(self):

@@ -39,6 +39,7 @@ class Config(BaseSettings):
     mongo: Dict[str, Any] = Field(default_factory=dict)
     api: Dict[str, Any] = Field(default_factory=dict)
     notification: Dict[str, Any] = Field(default_factory=dict)
+    blockchain: Dict[str, Any] = Field(default_factory=dict)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -47,6 +48,7 @@ class Config(BaseSettings):
         self.mongo = self._load_mongo_config()
         self.api = self._load_api_config()
         self.notification = self._load_notification_config()
+        self.blockchain = self._load_blockchain_config()
 
     def _load_redis_config(self) -> Dict[str, Any]:
         """Load Redis configuration"""
@@ -170,6 +172,53 @@ class Config(BaseSettings):
 
         return config
 
+    def _load_blockchain_config(self) -> Dict[str, Any]:
+        """Load blockchain configuration"""
+        # Default values
+        config = {
+            "connection": {
+                "ethereum": {
+                    "rpc_url": os.environ.get("ETH_RPC_URL", "https://eth-mainnet.g.alchemy.com/v2/YOUR-API-KEY"),
+                    "ws_url": os.environ.get("ETH_WS_URL"),
+                    "chain_id": 1
+                },
+                "bsc": {
+                    "rpc_url": os.environ.get("BSC_RPC_URL", "https://bsc-dataseed.binance.org/"),
+                    "ws_url": os.environ.get("BSC_WS_URL"),
+                    "chain_id": 56
+                },
+                "base": {
+                    "rpc_url": os.environ.get("BASE_RPC_URL", "https://mainnet.base.org"),
+                    "ws_url": os.environ.get("BASE_WS_URL"),
+                    "chain_id": 8453
+                }
+            },
+            "settings": {
+                "block_cache_size": int(os.environ.get("BLOCK_CACHE_SIZE", "1000")),
+                "tx_cache_size": int(os.environ.get("TX_CACHE_SIZE", "10000")),
+                "watch_interval": int(os.environ.get("WATCH_INTERVAL", "30")),
+                "max_blocks_per_request": int(os.environ.get("MAX_BLOCKS_PER_REQUEST", "100")),
+                "retry": {
+                    "max_retries": int(os.environ.get("BLOCKCHAIN_MAX_RETRIES", "3")),
+                    "retry_delay": int(os.environ.get("BLOCKCHAIN_RETRY_DELAY", "5"))
+                }
+            }
+        }
+
+        # Load from main config file
+        file_config = load_yaml_config(self.config_dir / 'blockchain.yaml')
+        if file_config:
+            # Update recursively preserving env var overrides
+            def update_config(base: Dict, update: Dict):
+                for k, v in update.items():
+                    if isinstance(v, dict) and k in base:
+                        update_config(base[k], v)
+                    else:
+                        base[k] = v
+            update_config(config, file_config)
+
+        return config
+
     def get_redis_url(self) -> str:
         """Get Redis connection URL"""
         password = f":{self.redis['password']}@" if self.redis.get("password") else ""
@@ -198,6 +247,26 @@ class Config(BaseSettings):
     def get_alert_interval(self) -> int:
         """Get Alert check interval in seconds"""
         return self.api["alert"].get("interval", 60)
+
+    def get_rpc_url(self, chain: str) -> str:
+        """Get RPC URL for a specific chain"""
+        return self.blockchain["connection"][chain.lower()]["rpc_url"]
+
+    def get_ws_url(self, chain: str) -> Optional[str]:
+        """Get WebSocket URL for a specific chain"""
+        return self.blockchain["connection"][chain.lower()].get("ws_url")
+
+    def get_chain_id(self, chain: str) -> int:
+        """Get chain ID for a specific chain"""
+        return self.blockchain["connection"][chain.lower()]["chain_id"]
+
+    def get_scan_url(self, chain: str) -> str:
+        """Get scan URL for a specific chain"""
+        return self.blockchain["connection"][chain.lower()]["scan_url"]
+
+    def get_blockchain_settings(self) -> Dict[str, Any]:
+        """Get blockchain settings"""
+        return self.blockchain["settings"]
 
 def load_yaml_config(file_path: Path) -> Dict:
     """Load YAML configuration file"""

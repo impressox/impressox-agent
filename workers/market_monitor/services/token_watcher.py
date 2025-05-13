@@ -249,7 +249,7 @@ class TokenWatcher(BaseWatcher):
             logger.error(f"[TokenWatcher] Error fetching token data: {e}", exc_info=True)
             return {}
 
-    async def evaluate_conditions(self, rule: Rule, target_data: Dict) -> List[Dict]:
+    def evaluate_conditions(self, rule: Rule, target_data: Dict) -> List[Dict]:
         """Evaluate rule conditions against token data"""
         matches = []
         condition = rule.condition or {"type": "any"}
@@ -352,7 +352,7 @@ class TokenWatcher(BaseWatcher):
                 })
 
             # Check significant price changes
-            if abs(price_change) > 5:  # 5% change threshold
+            if abs(price_change) > 10:  # 5% change threshold
                 logger.info(f"[TokenWatcher] Significant price change detected: {price_change}%")
                 matches.append({
                     "token": token,
@@ -363,14 +363,14 @@ class TokenWatcher(BaseWatcher):
                 })
 
             # Check 24h changes
-            if abs(change_24h) > 1:  # 10% 24h change threshold
-                logger.info(f"[TokenWatcher] Significant 24h change detected: {change_24h}%")
-                matches.append({
-                    "token": token,
-                    "condition": "price_change_24h",
-                    "value": change_24h,
-                    "current_price": price
-                })
+            # if abs(change_24h) > 1:  # 10% 24h change threshold
+            #     logger.info(f"[TokenWatcher] Significant 24h change detected: {change_24h}%")
+            #     matches.append({
+            #         "token": token,
+            #         "condition": "price_change_24h",
+            #         "value": change_24h,
+            #         "current_price": price
+            #     })
 
         if matches:
             logger.info(f"[TokenWatcher] Found {len(matches)} matches for rule {rule.rule_id}")

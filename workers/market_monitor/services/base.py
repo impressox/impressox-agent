@@ -198,7 +198,7 @@ class BaseWatcher:
         """Check conditions for each rule against target data"""
         for rule in rules:
             try:
-                matches = await self.evaluate_conditions(rule, target_data)
+                matches = self.evaluate_conditions(rule, target_data)
                 if matches:
                     # Create match data with consistent format
                     match_data = {

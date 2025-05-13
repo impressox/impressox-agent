@@ -7,6 +7,10 @@ from app.tools.general.watch_market import watch_market
 from app.tools.general.unwatch_market import unwatch_market
 from app.tools.general.search_knowledge import search_knowledge_tool
 from app.tools.general.notification_control import toggle_notification
+from app.tools.general.watch_wallet import watch_wallet
+from app.tools.general.unwatch_wallet import unwatch_wallet
+from app.tools.general.watch_airdrop import watch_airdrop
+from app.tools.general.unwatch_airdrop import unwatch_airdrop
 
 @register_tool(NodeName.GENERAL_NODE, "get_token_price")
 @tool
@@ -32,5 +36,9 @@ __all__ = [
     "watch_market",
     "unwatch_market",
     "search_knowledge_tool",
-    "toggle_notification"
+    "toggle_notification",
+    "watch_wallet",
+    "unwatch_wallet",
+    "watch_airdrop",
+    "unwatch_airdrop"
 ]
