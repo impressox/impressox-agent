@@ -194,11 +194,13 @@ class WalletWatcher(BaseWatcher):
     async def watch_targets(self):
         """Watch wallet activities across multiple chains"""
         try:
-            logger.info(f"[WalletWatcher] Checking activities for wallets: {list(self.watching_targets)}")
+            # Create a copy of watching_targets to avoid modification during iteration
+            watching_targets = set(self.watching_targets)
+            logger.info(f"[WalletWatcher] Checking activities for wallets: {list(watching_targets)}")
             
             # Get target_data from active rules
             target_data = {}
-            for wallet in self.watching_targets:
+            for wallet in watching_targets:
                 try:
                     rules = await self.redis.hgetall(f"watch:active:wallet:{wallet}")
                     for rule_json in rules.values():
@@ -222,7 +224,7 @@ class WalletWatcher(BaseWatcher):
             evm_wallets = set()
             solana_wallets = set()
             
-            for wallet in self.watching_targets:
+            for wallet in watching_targets:
                 try:
                     if wallet not in self.wallet_types:
                         wallet_type, is_valid = validate_wallet_address(wallet)
@@ -285,7 +287,7 @@ class WalletWatcher(BaseWatcher):
 
             # Get all active wallet rules
             active_rules = []
-            for wallet in self.watching_targets:
+            for wallet in watching_targets:
                 try:
                     rules = await self.redis.hgetall(f"watch:active:wallet:{wallet}")
                     for rule_json in rules.values():
@@ -331,7 +333,6 @@ class WalletWatcher(BaseWatcher):
 
             result = {}
             current_block = w3.eth.block_number
-            from_block = self.block_cache.get(chain.value, current_block - 100)  # Default to last 100 blocks
             
             for wallet in wallets:
                 try:
@@ -342,6 +343,10 @@ class WalletWatcher(BaseWatcher):
                     
                     # Get logs for each event type separately
                     all_logs = []
+                    
+                    # Get from_block from cache for this specific wallet and chain
+                    cache_key = f"{chain.value}:{wallet}"
+                    from_block = self.block_cache.get(cache_key, current_block - 100)  # Default to last 100 blocks
                     
                     # Helper function to get logs using direct RPC call
                     def get_logs_direct(filter_params):
@@ -418,8 +423,11 @@ class WalletWatcher(BaseWatcher):
                     logger.error(f"[WalletWatcher] Error processing wallet {wallet}: {e}", exc_info=True)
                     continue
             
-            # Update block cache
-            self.block_cache[chain.value] = current_block
+            # Update block cache for each wallet
+            for wallet in wallets:
+                cache_key = f"{chain.value}:{wallet}"
+                self.block_cache[cache_key] = current_block
+                logger.info(f"[WalletWatcher] Updated block cache for {wallet} on {chain.value}: {current_block}")
             
             return result
             
@@ -1089,3 +1097,35 @@ class WalletWatcher(BaseWatcher):
         except Exception as e:
             logger.error(f"[WalletWatcher] Error processing ERC1155 transfer: {e}", exc_info=True)
             return None 
+
+    async def initialize_cache(self, targets: List[str]):
+        """Initialize cache for new wallets"""
+        try:
+            for wallet in targets:
+                # Initialize block cache for all chains
+                for chain in self.evm_chains:
+                    cache_key = f"{chain.value}:{wallet}"
+                    if cache_key not in self.block_cache:
+                        try:
+                            w3 = chain.w3
+                            if w3.is_connected():
+                                current_block = w3.eth.block_number
+                                self.block_cache[cache_key] = current_block
+                                logger.info(f"[WalletWatcher] Initialized block cache for {wallet} on {chain.value}: {current_block}")
+                        except Exception as e:
+                            logger.error(f"[WalletWatcher] Error initializing block cache for {wallet} on {chain.value}: {e}")
+
+                # Initialize Solana block cache
+                cache_key = f"{self.solana_chain.value}:{wallet}"
+                if cache_key not in self.block_cache:
+                    try:
+                        client = self.solana_chain.solana_client
+                        if client:
+                            slot = await client.get_slot()
+                            if slot.value:
+                                self.block_cache[cache_key] = slot.value
+                                logger.info(f"[WalletWatcher] Initialized block cache for {wallet} on Solana: {slot.value}")
+                    except Exception as e:
+                        logger.error(f"[WalletWatcher] Error initializing block cache for {wallet} on Solana: {e}")
+        except Exception as e:
+            logger.error(f"[WalletWatcher] Error initializing cache: {e}", exc_info=True) 

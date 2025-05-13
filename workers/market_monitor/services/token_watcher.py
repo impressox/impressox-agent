@@ -375,3 +375,20 @@ class TokenWatcher(BaseWatcher):
         if matches:
             logger.info(f"[TokenWatcher] Found {len(matches)} matches for rule {rule.rule_id}")
         return matches 
+
+    async def initialize_cache(self, targets: List[str]):
+        """Initialize cache for new tokens"""
+        try:
+            for token in targets:
+                # Initialize price cache for new tokens
+                if token not in self.price_cache:
+                    try:
+                        # Get initial price data
+                        token_data = await self.get_token_data([token])
+                        if token_data and token in token_data:
+                            self.price_cache[token] = token_data[token].get("price", 0)
+                            logger.info(f"[TokenWatcher] Initialized price cache for {token}: {self.price_cache[token]}")
+                    except Exception as e:
+                        logger.error(f"[TokenWatcher] Error initializing price cache for {token}: {e}")
+        except Exception as e:
+            logger.error(f"[TokenWatcher] Error initializing cache: {e}", exc_info=True) 

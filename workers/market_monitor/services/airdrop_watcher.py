@@ -279,3 +279,20 @@ class AirdropWatcher(BaseWatcher):
         if matches:
             logger.info(f"[AirdropWatcher] Found {len(matches)} matches for rule {rule.rule_id}")
         return matches 
+
+    async def initialize_cache(self, targets: List[str]):
+        """Initialize cache for new airdrop targets"""
+        try:
+            for target in targets:
+                # Initialize airdrop cache for new targets
+                if target not in self.airdrop_cache:
+                    try:
+                        # Get initial airdrop data
+                        airdrop_data = await self.get_airdrop_data([target])
+                        if airdrop_data and target in airdrop_data:
+                            self.airdrop_cache[target] = airdrop_data[target].get("data", {})
+                            logger.info(f"[AirdropWatcher] Initialized airdrop cache for {target}")
+                    except Exception as e:
+                        logger.error(f"[AirdropWatcher] Error initializing airdrop cache for {target}: {e}")
+        except Exception as e:
+            logger.error(f"[AirdropWatcher] Error initializing cache: {e}", exc_info=True) 

@@ -39,6 +39,10 @@ class NotifyDispatcher:
         self.dedup_max_messages = self.config.notification.get("dedup_max_messages", 10)  # Keep last 10 messages
         # Supported watch types
         self.watch_types = ["market", "wallet", "airdrop"]
+        # Telegram specific settings
+        self.telegram_bot_token = self.config.notification["telegram"]["bot_token"]
+        self.telegram_api_url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage"
+        self.telegram_timeout = self.config.notification["telegram"]["timeout"]
 
     async def start(self):
         """Start the notification dispatcher"""
@@ -47,9 +51,22 @@ class NotifyDispatcher:
             self.redis = await RedisClient.get_instance()
             logger.info("[NotifyDispatcher] Redis connection established")
             
-            # Create initial session
-            await self._ensure_session()
-            logger.info("[NotifyDispatcher] HTTP session created")
+            # Create HTTP session with optimized settings
+            connector = aiohttp.TCPConnector(
+                limit=100,  # Max concurrent connections
+                ttl_dns_cache=300,  # DNS cache TTL
+                force_close=False,  # Enable keep-alive
+                enable_cleanup_closed=True  # Clean up closed connections
+            )
+            self.session = aiohttp.ClientSession(
+                connector=connector,
+                timeout=aiohttp.ClientTimeout(
+                    total=self.telegram_timeout,
+                    connect=5,  # Connection timeout
+                    sock_read=5  # Read timeout
+                )
+            )
+            logger.info("[NotifyDispatcher] HTTP session created with optimized settings")
             
             # Subscribe to all watch types
             for watch_type in self.watch_types:
@@ -68,18 +85,6 @@ class NotifyDispatcher:
                     await asyncio.sleep(1)
         except Exception as e:
             logger.error(f"[NotifyDispatcher] Failed to start: {e}")
-            raise
-
-    async def _ensure_session(self):
-        """Ensure HTTP session is active"""
-        try:
-            if self.session is None or self.session.closed:
-                if self.session is not None:
-                    await self.session.close()
-                self.session = aiohttp.ClientSession()
-                logger.info("[NotifyDispatcher] Created new HTTP session")
-        except Exception as e:
-            logger.error(f"[NotifyDispatcher] Error ensuring session: {e}")
             raise
 
     async def is_duplicate_notification(self, notification: Notification) -> bool:
@@ -365,14 +370,9 @@ class NotifyDispatcher:
     async def send_telegram(self, notification: Notification) -> bool:
         """Send notification via Telegram Bot API"""
         try:
-            # Get bot token from config
-            bot_token = self.config.notification["telegram"]["bot_token"]
-            if not bot_token:
+            if not self.telegram_bot_token:
                 logger.error("Telegram bot token not configured")
                 return False
-
-            # Ensure session is active
-            await self._ensure_session()
 
             # Prepare message
             message = {
@@ -389,17 +389,13 @@ class NotifyDispatcher:
                     message["disable_web_page_preview"] = notification.metadata["disable_web_page_preview"]
 
             # Send message using Telegram Bot API
-            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-            logger.info(f"Sending Telegram message to {notification.user}: {message}")
+            logger.info(f"Sending Telegram message to {notification.user}")
             
             async with self.session.post(
-                url, 
-                json=message, 
-                timeout=self.config.notification["telegram"]["timeout"]
+                self.telegram_api_url, 
+                json=message,
+                timeout=self.telegram_timeout
             ) as response:
-                response_text = await response.text()
-                logger.info(f"Telegram API response: {response.status} - {response_text}")
-                
                 if response.status == 200:
                     result = await response.json()
                     if result.get("ok"):
@@ -410,6 +406,7 @@ class NotifyDispatcher:
                         logger.error(f"Telegram API error: {error_msg}")
                         return False
                 else:
+                    response_text = await response.text()
                     logger.error(f"Failed to send Telegram message. Status: {response.status}, Response: {response_text}")
                     return False
 

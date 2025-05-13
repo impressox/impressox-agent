@@ -349,7 +349,8 @@ class RuleMatcher:
                     "rule_id": rule.rule_id,
                     "user_id": rule.user_id,
                     "conversation_id": rule.metadata.get("conversation_id"),
-                    "parse_mode": "HTML"  # Add parse_mode for HTML formatting
+                    "parse_mode": "HTML",  # Add parse_mode for HTML formatting
+                    "disable_web_page_preview": True
                 }
             )
 

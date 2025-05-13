@@ -140,6 +140,9 @@ class BaseWatcher:
                 self.watching_targets.update(event_data["target"])
                 logger.info(f"[{self.__class__.__name__}] Now watching targets: {event_data['target']}")
                 
+                # Initialize cache for new targets
+                await self.initialize_cache(event_data["target"])
+                
                 # Save rule to Redis
                 for target in event_data["target"]:
                     rule_key = f"watch:active:{self.watch_type}:{target}"
@@ -147,6 +150,10 @@ class BaseWatcher:
                     logger.info(f"[{self.__class__.__name__}] Saved rule {event_data['rule_id']} for target {target}")
         except Exception as e:
             logger.error(f"[{self.__class__.__name__}] Error handling rule registration: {e}", exc_info=True)
+
+    async def initialize_cache(self, targets: List[str]):
+        """Initialize cache for new targets. Override this method in child classes."""
+        pass
 
     async def handle_rule_deactivation(self, channel: str, event_data: Dict):
         """Handle rule deactivation events"""
