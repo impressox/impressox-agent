@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 class RuleMatcher:
     def __init__(self):
         self.redis = None
+        self.watch_types = ["market", "wallet", "airdrop"]  # List of supported watch types
 
     async def start(self):
         """Start the rule matcher processor"""
@@ -21,10 +22,12 @@ class RuleMatcher:
             self.redis = await RedisClient.get_instance()
             logger.info("[RuleMatcher] Redis connection established")
 
-            # Subscribe to rule matched events
-            logger.info("[RuleMatcher] Subscribing to market_watch:rule_matched channel")
-            await self.redis.subscribe("market_watch:rule_matched", self.process_match)
-            logger.info("[RuleMatcher] Successfully subscribed to rule_matched channel")
+            # Subscribe to rule matched events for all watch types
+            for watch_type in self.watch_types:
+                channel = f"{watch_type}_watch:rule_matched"
+                logger.info(f"[RuleMatcher] Subscribing to {channel}")
+                await self.redis.subscribe(channel, self.process_match)
+                logger.info(f"[RuleMatcher] Successfully subscribed to {channel}")
 
             logger.info("[RuleMatcher] Processor started and running")
             # Keep the processor running
@@ -43,6 +46,9 @@ class RuleMatcher:
         try:
             logger.info(f"[RuleMatcher] Processing match data: {json.dumps(match_data, cls=MongoJSONEncoder)}")
             
+            # Extract watch_type from channel
+            watch_type = channel.split("_")[0]
+            
             # Convert data to RuleMatch
             rule = Rule.from_dict(match_data["rule"])
             match = RuleMatch(
@@ -52,13 +58,13 @@ class RuleMatcher:
             logger.info(f"[RuleMatcher] Created RuleMatch for rule {rule.rule_id}")
 
             # Validate match
-            if not self.validate_match(match):
+            if not self.validate_match(match, watch_type):
                 logger.warning(f"[RuleMatcher] Invalid match data: {match_data}")
                 return
             logger.info(f"[RuleMatcher] Match data validated successfully")
 
             # Check for duplicate notification
-            notification_key = f"notify:last:{rule.rule_id}"
+            notification_key = f"notify:last:{watch_type}:{rule.rule_id}"
             last_notify = await self.redis.get(notification_key)
             
             # Get current match data for comparison
@@ -86,16 +92,16 @@ class RuleMatcher:
             logger.info(f"[RuleMatcher] No duplicate found, proceeding with notification")
                 
             # Create notification
-            notification = self.create_notification(match)
+            notification = self.create_notification(match, watch_type)
             if notification:
                 logger.info(f"[RuleMatcher] Created notification: {json.dumps(notification.to_dict(), cls=MongoJSONEncoder)}")
                 
                 # Publish to notification channel
                 await self.redis.publish(
-                    "market_watch:send_notify",
+                    f"{watch_type}_watch:send_notify",
                     json.dumps(notification.to_dict(), cls=MongoJSONEncoder)
                 )
-                logger.info(f"[RuleMatcher] Published notification to market_watch:send_notify")
+                logger.info(f"[RuleMatcher] Published notification to {watch_type}_watch:send_notify")
                 
                 # Store current match data to prevent duplicates
                 await self.redis.set(notification_key, current_match, 60)  # Expire after 60 seconds
@@ -108,7 +114,7 @@ class RuleMatcher:
         except Exception as e:
             logger.error(f"[RuleMatcher] Error processing match {match_data}: {e}", exc_info=True)
 
-    def validate_match(self, match: RuleMatch) -> bool:
+    def validate_match(self, match: RuleMatch, watch_type: str) -> bool:
         """Validate match data"""
         try:
             if not match.rule or not match.match_data:
@@ -119,18 +125,29 @@ class RuleMatcher:
             if not isinstance(matches, list):
                 return False
 
-            # Validate each match
+            # Validate each match based on watch_type
             for m in matches:
                 if not isinstance(m, dict):
                     return False
                     
-                # For price alerts, require token
-                if m.get("condition") in ["price_above", "price_below", "price_change", "price_change_24h"]:
-                    if "token" not in m:
-                        return False
-                        
+                if watch_type == "market":
+                    # For price alerts, require token
+                    if m.get("condition") in ["price_above", "price_below", "price_change", "price_change_24h"]:
+                        if "token" not in m:
+                            return False
+                elif watch_type == "wallet":
+                    # For wallet alerts, require wallet address
+                    if m.get("condition") in ["balance_below", "balance_change", "token_transfer", "nft_transfer"]:
+                        if "wallet" not in m:
+                            return False
+                elif watch_type == "airdrop":
+                    # For airdrop alerts, require project
+                    if m.get("condition") in ["airdrop_announced", "airdrop_started", "airdrop_ended"]:
+                        if "project" not in m:
+                            return False
+                            
                 # For general alerts, require message
-                elif m.get("condition") == "alert":
+                if m.get("condition") == "alert":
                     if "message" not in m:
                         return False
 
@@ -140,47 +157,81 @@ class RuleMatcher:
             logger.error(f"Error validating match: {e}")
             return False
 
-    def create_notification(self, match: RuleMatch) -> Optional[Notification]:
+    def create_notification(self, match: RuleMatch, watch_type: str) -> Optional[Notification]:
         """Create notification from match data"""
         try:
             # Extract data
             rule = match.rule
             matches = match.match_data["matches"]
-            token_data = match.match_data.get("token_data", {})
 
             # Build notification message
             messages = []
             for m in matches:
                 condition = m.get("condition")
-                token = m["token"]
                 
-                if condition == "price_above":
-                    current_price = m["value"]  # Giá hiện tại
-                    msg = f"<b>{token}</b> price above ${m['threshold']:,.2f} (current: ${current_price:,.2f})"
-                elif condition == "price_below":
-                    current_price = m["value"]  # Giá hiện tại
-                    msg = f"<b>{token}</b> price below ${m['threshold']:,.2f} (current: ${current_price:,.2f})"
-                elif condition == "price_change":
-                    change = m["value"]  # Phần trăm thay đổi
-                    old_price = m["old_price"]
-                    new_price = m["new_price"]
-                    direction = "increased" if change > 0 else "decreased"
-                    msg = f"<b>{token}</b> {direction} by {abs(change):.1f}% (from ${old_price:,.2f} → ${new_price:,.2f})"
-                elif condition == "price_change_24h":
-                    change = m["value"]  # Phần trăm thay đổi 24h
-                    current_price = m.get("current_price", 0)  # Lấy giá hiện tại từ match data
-                    direction = "increased" if change > 0 else "decreased"
-                    msg = f"<b>{token}</b> {direction} by {abs(change):.1f}% in 24h (current: ${current_price:,.2f})"
+                if watch_type == "market":
+                    token = m["token"]
+                    if condition == "price_above":
+                        current_price = m["value"]
+                        msg = f"<b>{token}</b> price above ${m['threshold']:,.2f} (current: ${current_price:,.2f})"
+                    elif condition == "price_below":
+                        current_price = m["value"]
+                        msg = f"<b>{token}</b> price below ${m['threshold']:,.2f} (current: ${current_price:,.2f})"
+                    elif condition == "price_change":
+                        change = m["value"]
+                        old_price = m["old_price"]
+                        new_price = m["new_price"]
+                        direction = "increased" if change > 0 else "decreased"
+                        msg = f"<b>{token}</b> {direction} by {abs(change):.1f}% (from ${old_price:,.2f} → ${new_price:,.2f})"
+                    elif condition == "price_change_24h":
+                        change = m["value"]
+                        current_price = m.get("current_price", 0)
+                        direction = "increased" if change > 0 else "decreased"
+                        msg = f"<b>{token}</b> {direction} by {abs(change):.1f}% in 24h (current: ${current_price:,.2f})"
+                    else:  # any condition
+                        price = m["price"]
+                        change = m["change"]
+                        change_24h = m["change_24h"]
+                        msg = f"<b>{token}</b>: ${price:,.2f} ({'+' if change >= 0 else ''}{change:.1f}% | {'+' if change_24h >= 0 else ''}{change_24h:.1f}% 24h)"
+                
+                elif watch_type == "wallet":
+                    wallet = m["wallet"]
+                    if condition == "balance_below":
+                        current_balance = m["value"]
+                        msg = f"<b>{wallet}</b> balance below {m['threshold']} (current: {current_balance})"
+                    elif condition == "balance_change":
+                        change = m["value"]
+                        old_balance = m["old_balance"]
+                        new_balance = m["new_balance"]
+                        direction = "increased" if change > 0 else "decreased"
+                        msg = f"<b>{wallet}</b> balance {direction} by {abs(change)} (from {old_balance} → {new_balance})"
+                    elif condition == "token_transfer":
+                        token = m["token"]
+                        amount = m["amount"]
+                        direction = m["direction"]
+                        msg = f"<b>{wallet}</b> {direction} {amount} {token}"
+                    elif condition == "nft_transfer":
+                        collection = m["collection"]
+                        token_id = m["token_id"]
+                        direction = m["direction"]
+                        msg = f"<b>{wallet}</b> {direction} NFT {token_id} from {collection}"
+                
+                elif watch_type == "airdrop":
+                    project = m["project"]
+                    if condition == "airdrop_announced":
+                        msg = f"<b>{project}</b> announced new airdrop"
+                    elif condition == "airdrop_started":
+                        msg = f"<b>{project}</b> airdrop has started"
+                    elif condition == "airdrop_ended":
+                        msg = f"<b>{project}</b> airdrop has ended"
+                
                 elif condition == "alert":
                     # For alert messages, use the message directly
                     msg = m.get("message", "")
                     if not msg:
                         continue
-                else:  # any condition
-                    price = m["price"]
-                    change = m["change"]
-                    change_24h = m["change_24h"]
-                    msg = f"<b>{token}</b>: ${price:,.2f} ({'+' if change >= 0 else ''}{change:.1f}% | {'+' if change_24h >= 0 else ''}{change_24h:.1f}% 24h)"
+                else:
+                    continue
 
                 messages.append(msg)
 

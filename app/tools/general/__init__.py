@@ -7,19 +7,23 @@ from app.tools.general.watch_market import watch_market
 from app.tools.general.unwatch_market import unwatch_market
 from app.tools.general.search_knowledge import search_knowledge_tool
 from app.tools.general.notification_control import toggle_notification
-import asyncio
 
 @register_tool(NodeName.GENERAL_NODE, "get_token_price")
 @tool
-def get_token_price_tool(asset: str) -> dict:
+async def get_token_price_tool(asset: str) -> dict:
     """
-    Lấy giá token từ CoinGecko hoặc DEX (Uniswap/Raydium) theo asset (địa chỉ hoặc tên/symbol).
-    Đầu vào: asset (có thể là địa chỉ token EVM/SOL, tên, symbol).
-    Trả về dict: {"success": bool, "data": {...} hoặc "error": "..."}
-    Luôn kèm theo phân tích cơ bản ngắn gọn, ví dụ như vốn hóa, cung lưu hành, hoặc tính thanh khoản với định dạng có cấu trúc rõ ràng
+    Retrieves token price and concise market analysis from CoinGecko or DEX (Uniswap/Raydium) based on the given asset.
+
+    Input:
+    - asset: token name, symbol, or contract address (EVM/Solana)
+
+    "Get full market info for any token including price, market cap, sentiment, and breakout signals. "
+    "Always use the 'summary' field in the result to reply directly to the user."
+
+    Response format markdown
     """
     try:
-        return asyncio.run(get_token_price(asset))
+        return await get_token_price(asset)
     except Exception as e:
         return {"success": False, "error": str(e)}
 

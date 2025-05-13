@@ -392,3 +392,9 @@ class RedisClient:
             except Exception as e:
                 logger.error(f"Error in pubsub listener: {e}")
                 await asyncio.sleep(1)  # Error backoff
+
+    def pubsub(self):
+        """Get Redis pubsub object"""
+        if not self._redis:
+            raise RedisError("Redis client not connected")
+        return self._redis.pubsub()

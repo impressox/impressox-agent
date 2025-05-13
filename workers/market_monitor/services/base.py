@@ -19,10 +19,14 @@ class BaseWatcher:
         self.watching_targets = set()  # Set of targets being watched
         self.is_running = False
         self._watch_task = None
+        self.watch_type = None  # Must be set by child classes
 
     async def start(self):
         """Start the watcher"""
         try:
+            if not self.watch_type:
+                raise ValueError("watch_type must be set by child class")
+
             self.redis = await RedisClient.get_instance()
             self.mongo = await MongoClient.get_instance()
             logger.info(f"[{self.__class__.__name__}] Successfully connected to Redis and MongoDB")
@@ -44,12 +48,12 @@ class BaseWatcher:
         """Maintain Redis subscriptions with retry logic"""
         while self.is_running:
             try:
-                # Subscribe to rule registration events
-                await self.redis.subscribe("market_watch:register_rule", self.handle_rule_registration)
+                # Subscribe to rule registration events using watch_type
+                await self.redis.subscribe(f"{self.watch_type}_watch:register_rule", self.handle_rule_registration)
                 logger.info(f"[{self.__class__.__name__}] Subscribed to rule registration events")
 
-                # Subscribe to rule deactivation events
-                await self.redis.subscribe("market_watch:deactivate_rule", self.handle_rule_deactivation)
+                # Subscribe to rule deactivation events using watch_type
+                await self.redis.subscribe(f"{self.watch_type}_watch:deactivate_rule", self.handle_rule_deactivation)
                 logger.info(f"[{self.__class__.__name__}] Subscribed to rule deactivation events")
 
                 # Keep the subscription alive
@@ -130,6 +134,7 @@ class BaseWatcher:
     async def handle_rule_registration(self, channel: str, event_data: Dict):
         """Handle rule registration events"""
         try:
+            logger.info(f"[{self.__class__.__name__}] Handling rule registration: {event_data}")
             if event_data["watch_type"] == self.watch_type:
                 # Add targets to watching set
                 self.watching_targets.update(event_data["target"])
@@ -208,7 +213,7 @@ class BaseWatcher:
                     )
                     # Publish match event
                     await self.redis.publish(
-                        "market_watch:rule_matched",
+                        f"{self.watch_type}_watch:rule_matched",
                         json.dumps(match.to_dict(), cls=MongoJSONEncoder)
                     )
                     logger.info(f"[{self.__class__.__name__}] Rule {rule.rule_id} matched: {json.dumps(matches, cls=MongoJSONEncoder)}")

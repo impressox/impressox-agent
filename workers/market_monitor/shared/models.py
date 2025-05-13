@@ -6,9 +6,10 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 class WatchType(str, Enum):
-    TOKEN = "token"
     WALLET = "wallet"
     CONTRACT = "contract"
+    MARKET = "market"
+    AIRDROP = "airdrop"
 
 class NotifyChannel(str, Enum):
     TELEGRAM = "telegram"

@@ -187,7 +187,7 @@ async def _unwatch_market_async(tokens: Optional[List[str]] = None, runable_conf
                         )
                         # Remove tokens from Redis
                         for token in tokens_to_remove:
-                            redis.hdel(f"watch:active:token:{token}", rule["rule_id"])
+                            redis.hdel(f"watch:active:market:{token}", rule["rule_id"])
                             deactivated_tokens.add(token)
                 else:
                     # No tokens remaining, deactivate entire rule
@@ -204,7 +204,7 @@ async def _unwatch_market_async(tokens: Optional[List[str]] = None, runable_conf
                         )
                         # Remove all tokens from Redis
                         for token in rule["target"]:
-                            redis.hdel(f"watch:active:token:{token}", rule["rule_id"])
+                            redis.hdel(f"watch:active:market:{token}", rule["rule_id"])
                             deactivated_tokens.add(token)
             except Exception as e:
                 logger.error(f"[UnwatchMarket] Error deactivating rule {rule['rule_id']}: {e}")

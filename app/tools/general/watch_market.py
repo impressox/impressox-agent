@@ -138,7 +138,7 @@ async def _watch_market_async(tokens: Optional[List[str]] = None, conditions: Op
         "rule_id": generate_rule_id(),
         "user_id": str(user_id),  # Convert to string to avoid ObjectId
         "user_name": user_name,
-        "watch_type": "token",
+        "watch_type": "market",
         "target": tokens if tokens else ["*"],  # Use "*" as a special token for watching all
         "target_data": {
             t["symbol"]: {

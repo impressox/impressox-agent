@@ -16,6 +16,7 @@ class RuleProcessor:
         self.redis = None
         self.mongo = None
         self.rule_storage = None
+        self.watch_types = ["market", "wallet", "airdrop"]  # List of supported watch types
 
     async def load_active_rules(self) -> List[Dict]:
         """Load all active rules from MongoDB"""
@@ -47,17 +48,20 @@ class RuleProcessor:
                 logger.info(f"[RuleProcessor] Found {len(active_rules)} active rules")
                 for rule_data in active_rules:
                     # Publish register_rule event for each rule
+                    watch_type = rule_data.get("watch_type", "token")  # Default to token for backward compatibility
                     await self.redis.publish(
-                        "market_watch:register_rule",
+                        f"{watch_type}_watch:register_rule",
                         json.dumps(rule_data, cls=MongoJSONEncoder)
                     )
                     logger.info(f"[RuleProcessor] Published register_rule event for rule {rule_data.get('rule_id')}")
                 logger.info("[RuleProcessor] Finished processing active rules")
 
-            # Subscribe to register_rule channel
-            logger.info("[RuleProcessor] Subscribing to market_watch:register_rule channel")
-            await self.redis.subscribe("market_watch:register_rule", self.process_rule)
-            logger.info("[RuleProcessor] Successfully subscribed to register_rule channel")
+            # Subscribe to register_rule channels for all watch types
+            for watch_type in self.watch_types:
+                channel = f"{watch_type}_watch:register_rule"
+                logger.info(f"[RuleProcessor] Subscribing to {channel}")
+                await self.redis.subscribe(channel, self.process_rule)
+                logger.info(f"[RuleProcessor] Successfully subscribed to {channel}")
 
             logger.info("[RuleProcessor] Processor started and running")
             # Keep the processor running
@@ -103,8 +107,8 @@ class RuleProcessor:
             try:
                 # Store in Redis for each target
                 for target in rule.target:
-                    # Use the same key format as TokenWatcher
-                    redis_key = f"watch:active:token:{target}"
+                    # Use watch_type from rule
+                    redis_key = f"watch:active:{rule.watch_type}:{target}"
                     logger.info(f"[RuleProcessor] Storing rule in Redis key: {redis_key}")
                     
                     # Store full rule data
@@ -121,7 +125,7 @@ class RuleProcessor:
 
                 # Publish rule activated event
                 await self.redis.publish(
-                    "market_watch:rule_activated",
+                    f"{rule.watch_type}_watch:rule_activated",
                     json.dumps({
                         "rule_id": str(rule.rule_id),
                         "watch_type": rule.watch_type,
@@ -148,7 +152,7 @@ class RuleProcessor:
                 return False
 
             # Validate watch type
-            if not rule.watch_type or rule.watch_type not in ["token", "wallet", "contract"]:
+            if not rule.watch_type or rule.watch_type not in self.watch_types:
                 return False
 
             # Validate condition if present

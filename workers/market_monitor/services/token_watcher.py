@@ -18,7 +18,7 @@ class TokenWatcher(BaseWatcher):
     def __init__(self):
         super().__init__()
         self.price_cache = {}  # Cache token prices to detect changes
-        self.watch_type = "token"
+        self.watch_type = "market"
         self.config = get_config()
 
     def _serialize_to_json(self, data):
@@ -91,7 +91,7 @@ class TokenWatcher(BaseWatcher):
             watch_price_rules = set()  # Track which rules need price watching
             for token in self.watching_targets:
                 try:
-                    rules = await self.redis.hgetall(f"watch:active:token:{token}")
+                    rules = await self.redis.hgetall(f"watch:active:{self.watch_type}:{token}")
                     if not rules:
                         logger.warning(f"[TokenWatcher] No rules found for token {token}")
                         continue
@@ -132,7 +132,7 @@ class TokenWatcher(BaseWatcher):
             active_rules = []
             for token in self.watching_targets:
                 try:
-                    rules = await self.redis.hgetall(f"watch:active:token:{token}")
+                    rules = await self.redis.hgetall(f"watch:active:{self.watch_type}:{token}")
                     if not rules:
                         continue
                         
@@ -363,7 +363,7 @@ class TokenWatcher(BaseWatcher):
                 })
 
             # Check 24h changes
-            if abs(change_24h) > 10:  # 10% 24h change threshold
+            if abs(change_24h) > 1:  # 10% 24h change threshold
                 logger.info(f"[TokenWatcher] Significant 24h change detected: {change_24h}%")
                 matches.append({
                     "token": token,

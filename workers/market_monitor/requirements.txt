@@ -6,8 +6,9 @@ python-dotenv>=1.0.0
 
 # API Clients
 aiohttp==3.9.3
-pydantic==2.6.3
-pydantic-settings==2.2.1
+pydantic>=2.7.4
+pydantic-settings>=2.4.0
+pydantic-core>=2.18.2
 PyYAML==6.0.1
 
 # Utils

@@ -2,7 +2,7 @@ import asyncio
 import logging
 import aiohttp
 import json
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from datetime import datetime, timedelta
 
 from workers.market_monitor.shared.models import Notification, NotifyChannel
@@ -36,6 +36,8 @@ class NotifyDispatcher:
         # Deduplication settings
         self.dedup_window = self.config.notification.get("dedup_window", 300)  # Default 5 minutes
         self.dedup_max_messages = self.config.notification.get("dedup_max_messages", 10)  # Keep last 10 messages
+        # Supported watch types
+        self.watch_types = ["market", "wallet", "airdrop"]
 
     async def start(self):
         """Start the notification dispatcher"""
@@ -44,12 +46,16 @@ class NotifyDispatcher:
             self.redis = await RedisClient.get_instance()
             logger.info("[NotifyDispatcher] Redis connection established")
             
-            self.session = aiohttp.ClientSession()
+            # Create initial session
+            await self._ensure_session()
             logger.info("[NotifyDispatcher] HTTP session created")
             
-            logger.info("[NotifyDispatcher] Subscribing to market_watch:send_notify channel")
-            await self.redis.subscribe("market_watch:send_notify", self.process_notification)
-            logger.info("[NotifyDispatcher] Successfully subscribed to send_notify channel")
+            # Subscribe to all watch types
+            for watch_type in self.watch_types:
+                channel = f"{watch_type}_watch:send_notify"
+                logger.info(f"[NotifyDispatcher] Subscribing to {channel}")
+                await self.redis.subscribe(channel, self.process_notification)
+                logger.info(f"[NotifyDispatcher] Successfully subscribed to {channel}")
 
             logger.info("[NotifyDispatcher] Processor started and running")
             # Keep the processor running
@@ -61,6 +67,18 @@ class NotifyDispatcher:
                     await asyncio.sleep(1)
         except Exception as e:
             logger.error(f"[NotifyDispatcher] Failed to start: {e}")
+            raise
+
+    async def _ensure_session(self):
+        """Ensure HTTP session is active"""
+        try:
+            if self.session is None or self.session.closed:
+                if self.session is not None:
+                    await self.session.close()
+                self.session = aiohttp.ClientSession()
+                logger.info("[NotifyDispatcher] Created new HTTP session")
+        except Exception as e:
+            logger.error(f"[NotifyDispatcher] Error ensuring session: {e}")
             raise
 
     async def is_duplicate_notification(self, notification: Notification) -> bool:
@@ -124,20 +142,40 @@ class NotifyDispatcher:
         try:
             logger.info(f"[NotifyDispatcher] Processing notification: {json.dumps(notify_data, cls=MongoJSONEncoder)}")
             
-            notification = Notification(
-                user=notify_data["user"],
-                channel=NotifyChannel(notify_data["channel"]),
-                message=notify_data["message"],
-                metadata=notify_data.get("metadata", {})
-            )
+            # Handle both old and new notification formats
+            if "rule" in notify_data and "match_data" in notify_data:
+                # New format
+                rule = notify_data.get("rule", {})
+                match_data = notify_data.get("match_data", {})
+                notification = Notification(
+                    user=rule.get("notify_id"),
+                    channel=NotifyChannel(rule.get("notify_channel")),
+                    message=self._format_message(rule, match_data),
+                    metadata={
+                        "rule_id": rule.get("rule_id"),
+                        "user_id": rule.get("user_id"),
+                        "watch_type": rule.get("watch_type"),
+                        "target": rule.get("target")
+                    }
+                )
+            else:
+                # Old format
+                notification = Notification(
+                    user=notify_data["user"],
+                    channel=NotifyChannel(notify_data["channel"]),
+                    message=notify_data["message"],
+                    metadata=notify_data.get("metadata", {})
+                )
+            
             logger.info(f"[NotifyDispatcher] Created notification object for user {notification.user} on channel {notification.channel}")
 
             # Check for duplicate notification
             if await self.is_duplicate_notification(notification):
                 logger.info(f"[NotifyDispatcher] Skipping duplicate notification for {notification.user} on {notification.channel}")
                 # Publish duplicate event
+                watch_type = notification.metadata.get("watch_type", "market")
                 await self.redis.publish(
-                    "market_watch:notify_duplicate",
+                    f"{watch_type}_watch:notify_duplicate",
                     json.dumps({
                         "rule_id": notification.metadata.get("rule_id"),
                         "user_id": notification.metadata.get("user_id"),
@@ -151,8 +189,9 @@ class NotifyDispatcher:
             # Check rate limit
             if not await self.check_rate_limit(notification.channel, notification.user):
                 logger.warning(f"[NotifyDispatcher] Rate limit exceeded for {notification.user} on {notification.channel}")
+                watch_type = notification.metadata.get("watch_type", "market")
                 await self.redis.publish(
-                    "market_watch:notify_failed",
+                    f"{watch_type}_watch:notify_failed",
                     json.dumps({
                         "rule_id": notification.metadata.get("rule_id"),
                         "user_id": notification.metadata.get("user_id"),
@@ -187,8 +226,9 @@ class NotifyDispatcher:
                         logger.info(f"[NotifyDispatcher] Notification sent via {notification.channel} to {notification.user}")
                         # Mark notification as sent
                         await self.redis.set(status_key, "sent", ex=self.dedup_window)
+                        watch_type = notification.metadata.get("watch_type", "market")
                         await self.redis.publish(
-                            "market_watch:notify_sent",
+                            f"{watch_type}_watch:notify_sent",
                             json.dumps({
                                 "rule_id": notification.metadata.get("rule_id"),
                                 "user_id": notification.metadata.get("user_id"),
@@ -208,8 +248,9 @@ class NotifyDispatcher:
                         raise
 
             logger.error(f"[NotifyDispatcher] Failed to send notification via {notification.channel} after {self.max_retries} attempts")
+            watch_type = notification.metadata.get("watch_type", "market")
             await self.redis.publish(
-                "market_watch:notify_failed",
+                f"{watch_type}_watch:notify_failed",
                 json.dumps({
                     "rule_id": notification.metadata.get("rule_id"),
                     "user_id": notification.metadata.get("user_id"),
@@ -220,16 +261,81 @@ class NotifyDispatcher:
 
         except Exception as e:
             logger.error(f"[NotifyDispatcher] Error processing notification {notify_data}: {e}", exc_info=True)
-            if notify_data.get("metadata"):
-                await self.redis.publish(
-                    "market_watch:notify_failed",
-                    json.dumps({
-                        "rule_id": notify_data["metadata"].get("rule_id"),
-                        "user_id": notify_data["metadata"].get("user_id"),
-                        "channel": notify_data.get("channel"),
-                        "error": str(e)
-                    }, cls=MongoJSONEncoder)
-                )
+            watch_type = "market"  # Default to market for old format
+            if "rule" in notify_data:
+                watch_type = notify_data["rule"].get("watch_type", "market")
+            await self.redis.publish(
+                f"{watch_type}_watch:notify_failed",
+                json.dumps({
+                    "rule_id": notify_data.get("rule_id") or notify_data.get("metadata", {}).get("rule_id"),
+                    "user_id": notify_data.get("user_id") or notify_data.get("metadata", {}).get("user_id"),
+                    "channel": notify_data.get("channel"),
+                    "error": str(e)
+                }, cls=MongoJSONEncoder)
+            )
+
+    def _format_message(self, rule: Dict, match_data: Dict) -> str:
+        """Format notification message based on rule and match data"""
+        try:
+            watch_type = rule.get("watch_type", "unknown")
+            target = rule.get("target", [])[0] if rule.get("target") else "unknown"
+            matches = match_data.get("matches", [])
+            
+            # Format message based on watch type
+            if watch_type == "token":
+                return self._format_token_message(target, matches)
+            elif watch_type == "wallet":
+                return self._format_wallet_message(target, matches)
+            elif watch_type == "airdrop":
+                return self._format_airdrop_message(target, matches)
+            else:
+                return f"Alert: {watch_type} condition met for {target}"
+                
+        except Exception as e:
+            logger.error(f"Error formatting message: {e}")
+            return "Alert: Condition met"
+
+    def _format_token_message(self, target: str, matches: List[Dict]) -> str:
+        """Format message for token price alerts"""
+        try:
+            message = f"🚨 Token Alert: {target}\n"
+            for match in matches:
+                if "price" in match:
+                    message += f"Current price: ${match['price']:.4f}\n"
+                if "change_24h" in match:
+                    message += f"24h change: {match['change_24h']:.2f}%\n"
+            return message
+        except Exception as e:
+            logger.error(f"Error formatting token message: {e}")
+            return f"Token Alert: {target}"
+
+    def _format_wallet_message(self, target: str, matches: List[Dict]) -> str:
+        """Format message for wallet activity alerts"""
+        try:
+            message = f"👛 Wallet Alert: {target}\n"
+            for match in matches:
+                if "transaction" in match:
+                    tx = match["transaction"]
+                    message += f"New transaction: {tx.get('hash', 'unknown')}\n"
+                    message += f"Amount: {tx.get('amount', 'unknown')}\n"
+            return message
+        except Exception as e:
+            logger.error(f"Error formatting wallet message: {e}")
+            return f"Wallet Alert: {target}"
+
+    def _format_airdrop_message(self, target: str, matches: List[Dict]) -> str:
+        """Format message for airdrop alerts"""
+        try:
+            message = f"🎁 Airdrop Alert: {target}\n"
+            for match in matches:
+                if "airdrop" in match:
+                    airdrop = match["airdrop"]
+                    message += f"New airdrop: {airdrop.get('name', 'unknown')}\n"
+                    message += f"Value: {airdrop.get('value', 'unknown')}\n"
+            return message
+        except Exception as e:
+            logger.error(f"Error formatting airdrop message: {e}")
+            return f"Airdrop Alert: {target}"
 
     async def send_telegram(self, notification: Notification) -> bool:
         """Send notification via Telegram Bot API"""
@@ -239,6 +345,9 @@ class NotifyDispatcher:
             if not bot_token:
                 logger.error("Telegram bot token not configured")
                 return False
+
+            # Ensure session is active
+            await self._ensure_session()
 
             # Prepare message
             message = {
@@ -310,10 +419,16 @@ class NotifyDispatcher:
 
     async def close(self):
         """Cleanup resources"""
-        if self.redis:
-            await self.redis.close()
-        if self.session:
-            await self.session.close()
+        try:
+            if self.redis:
+                await self.redis.close()
+                self.redis = None
+            if self.session:
+                await self.session.close()
+                self.session = None
+            logger.info("[NotifyDispatcher] Successfully closed all connections")
+        except Exception as e:
+            logger.error(f"[NotifyDispatcher] Error closing connections: {e}", exc_info=True)
 
 async def main():
     """Main entry point for notify dispatcher"""
