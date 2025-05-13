@@ -32,3 +32,6 @@ types-PyYAML>=5.4.0
 solana>=0.36.6
 base58>=2.1.1
 eth_utils>=5.3.0
+
+#web3
+web3>=7.11.0

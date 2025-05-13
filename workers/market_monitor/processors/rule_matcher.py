@@ -173,32 +173,39 @@ class RuleMatcher:
                 msg = None  # Initialize msg variable
                 
                 if watch_type == "market":
-                    token = m["token"]
-                    if condition == "price_above":
-                        current_price = m["value"]
-                        msg = f"<b>{token}</b> price above ${m['threshold']:,.2f} (current: ${current_price:,.2f})"
-                    elif condition == "price_below":
-                        current_price = m["value"]
-                        msg = f"<b>{token}</b> price below ${m['threshold']:,.2f} (current: ${current_price:,.2f})"
-                    elif condition == "price_change":
-                        change = m["value"]
-                        old_price = m["old_price"]
-                        new_price = m["new_price"]
-                        direction = "increased" if change > 0 else "decreased"
-                        msg = f"<b>{token}</b> {direction} by {abs(change):.1f}% (from ${old_price:,.2f} → ${new_price:,.2f})"
-                    elif condition == "price_change_24h":
-                        change = m["value"]
-                        current_price = m.get("current_price", 0)
-                        direction = "increased" if change > 0 else "decreased"
-                        msg = f"<b>{token}</b> {direction} by {abs(change):.1f}% in 24h (current: ${current_price:,.2f})"
-                    else:  # any condition
-                        price = m["price"]
-                        change = m["change"]
-                        change_24h = m["change_24h"]
-                        msg = f"<b>{token}</b>: ${price:,.2f} ({'+' if change >= 0 else ''}{change:.1f}% | {'+' if change_24h >= 0 else ''}{change_24h:.1f}% 24h)"
+                    if condition == "alert":
+                        # For alert messages, use the message directly
+                        msg = m.get("message", "")
+                        if not msg:
+                            continue
+                    else:
+                        token = m["token"]
+                        if condition == "price_above":
+                            current_price = m["value"]
+                            msg = f"<b>{token}</b> price above ${m['threshold']:,.2f} (current: ${current_price:,.2f})"
+                        elif condition == "price_below":
+                            current_price = m["value"]
+                            msg = f"<b>{token}</b> price below ${m['threshold']:,.2f} (current: ${current_price:,.2f})"
+                        elif condition == "price_change":
+                            change = m["value"]
+                            old_price = m["old_price"]
+                            new_price = m["new_price"]
+                            direction = "increased" if change > 0 else "decreased"
+                            msg = f"<b>{token}</b> {direction} by {abs(change):.1f}% (from ${old_price:,.2f} → ${new_price:,.2f})"
+                        elif condition == "price_change_24h":
+                            change = m["value"]
+                            current_price = m.get("current_price", 0)
+                            direction = "increased" if change > 0 else "decreased"
+                            msg = f"<b>{token}</b> {direction} by {abs(change):.1f}% in 24h (current: ${current_price:,.2f})"
+                        else:  # any condition
+                            price = m["price"]
+                            change = m["change"]
+                            change_24h = m["change_24h"]
+                            msg = f"<b>{token}</b>: ${price:,.2f} ({'+' if change >= 0 else ''}{change:.1f}% | {'+' if change_24h >= 0 else ''}{change_24h:.1f}% 24h)"
                 
                 elif watch_type == "wallet":
                     wallet = m["wallet"]
+                    wallet_name = m.get("wallet_name", wallet)
                     chain = m.get("chain", "ethereum")
                     activity_type = m.get("activity_type")
                     
@@ -210,6 +217,7 @@ class RuleMatcher:
                         scan_url = self.config.get_scan_url(chain)
                         
                         msg = f"🔔 <b>Native Transfer (Received)</b> on <b>{chain.upper()}</b>\n"
+                        msg += f"• Wallet: <a href='{scan_url}/address/{wallet}'>{wallet_name}</a>\n"
                         msg += f"• From: <code>{m.get('from', 'Unknown')}</code> (<a href='{scan_url}/address/{m.get('from', 'Unknown')}'>View</a>)\n"
                         msg += f"• To: <code>{m.get('to', 'Unknown')}</code> (<a href='{scan_url}/address/{m.get('to', 'Unknown')}'>View</a>)\n"
                         msg += f"• Amount: {amount} {chain.upper()}\n"
@@ -223,6 +231,7 @@ class RuleMatcher:
                         scan_url = self.config.get_scan_url(chain)
                         
                         msg = f"🔔 <b>Native Transfer (Sent)</b> on <b>{chain.upper()}</b>\n"
+                        msg += f"• Wallet: <a href='{scan_url}/address/{wallet}'>{wallet_name}</a>\n"
                         msg += f"• From: <code>{m.get('from', 'Unknown')}</code> (<a href='{scan_url}/address/{m.get('from', 'Unknown')}'>View</a>)\n"
                         msg += f"• To: <code>{m.get('to', 'Unknown')}</code> (<a href='{scan_url}/address/{m.get('to', 'Unknown')}'>View</a>)\n"
                         msg += f"• Amount: {amount} {chain.upper()}\n"
@@ -239,6 +248,7 @@ class RuleMatcher:
                         scan_url = self.config.get_scan_url(chain)
                         
                         msg = f"🔔 <b>Token Transfer (Received)</b> on <b>{chain.upper()}</b>\n"
+                        msg += f"• Wallet: <a href='{scan_url}/address/{wallet}'>{wallet_name}</a>\n"
                         msg += f"• From: <a href='{scan_url}/address/{from_address}'>{from_address}</a>\n"
                         msg += f"• To: <a href='{scan_url}/address/{to_address}'>{to_address}</a>\n"
                         msg += f"• Type: ERC-20\n"
@@ -256,18 +266,13 @@ class RuleMatcher:
                         scan_url = self.config.get_scan_url(chain)
                         
                         msg = f"🔔 <b>Token Transfer (Sent)</b> on <b>{chain.upper()}</b>\n"
+                        msg += f"• Wallet: <a href='{scan_url}/address/{wallet}'>{wallet_name}</a>\n"
                         msg += f"• From: <a href='{scan_url}/address/{from_address}'>{from_address}</a>\n"
                         msg += f"• To: <a href='{scan_url}/address/{to_address}'>{to_address}</a>\n"
                         msg += f"• Type: ERC-20\n"
                         msg += f"• Token: <code>{token}</code> (<a href='{scan_url}/token/{token}'>View</a>)\n"
                         msg += f"• Amount: {amount} {token_symbol} ({token_name})\n"
                         msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>"
-                    elif activity_type == "nft_transfer_in":
-                        collection = m.get("collection", "Unknown")
-                        token_id = m.get("token_id", "Unknown")
-                        standard = m.get("standard", "ERC721")
-                        amount = m.get("amount", 1)
-                        msg = f"<b>{wallet}</b> received {amount} {standard} NFT #{token_id} from {collection} on {chain.upper()}"
                     elif activity_type == "token_trade":
                         token_in = m.get("token_in", "Unknown")
                         token_in_name = m.get("token_in_name", "Unknown")
@@ -279,19 +284,19 @@ class RuleMatcher:
                         amount_out = m.get("formatted_amount_out", m.get("amount_out", "N/A"))
                         tx_hash = m.get("hash", "")
                         scan_url = self.config.get_scan_url(chain)
-                        wallet = m.get("wallet", "Unknown")
                         
                         if token_out == "native":
                             msg = f"🔔 <b>Token Trade (Sold)</b> on <b>{chain.upper()}</b>\n"
-                            msg += f"• Wallet: <a href='{scan_url}/address/{wallet}'>{wallet}</a>\n"
+                            msg += f"• Wallet: <a href='{scan_url}/address/{wallet}'>{wallet_name}</a>\n"
                             msg += f"• Sold: {amount_in} {token_in_symbol} ({token_in_name})\n"
                             msg += f"• Received: {amount_out} {token_out_symbol}\n"
                             msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>"
                         else:
                             msg = f"🔔 <b>Token Trade (Swapped)</b> on <b>{chain.upper()}</b>\n"
-                            msg += f"• Wallet: <a href='{scan_url}/address/{wallet}'>{wallet}</a>\n"
+                            msg += f"• Wallet: <a href='{scan_url}/address/{wallet}'>{wallet_name}</a>\n"
                             msg += f"• Sold: {amount_in} {token_in_symbol} ({token_in_name})\n"
                             msg += f"• Bought: {amount_out} {token_out_symbol} ({token_out_name})\n"
+                            msg += f"• CA: <code>{token_out}</code>\n"
                             msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>"
                     elif activity_type == "nft_trade":
                         collection = m.get("collection", "Unknown")

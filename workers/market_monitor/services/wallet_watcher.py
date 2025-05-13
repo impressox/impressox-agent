@@ -510,6 +510,9 @@ class WalletWatcher(BaseWatcher):
         logger.info(f"[WalletWatcher] Evaluating conditions for rule {rule.rule_id}: {json.dumps(condition)}")
 
         for wallet in rule.target:
+            # Get wallet name from target_data
+            wallet_name = rule.target_data.get(wallet, {}).get("name", wallet)
+            
             for chain_data in wallet_data.values():
                 if wallet not in chain_data:
                     continue
@@ -541,16 +544,19 @@ class WalletWatcher(BaseWatcher):
                     if tx_hash not in tx_matches:
                         tx_matches[tx_hash] = {
                             'wallet': wallet,
+                            'wallet_name': wallet_name,
                             'chain': chain,
                             'hash': tx_hash,
                             'block_number': tx.get('block_number'),
                             'timestamp': datetime.utcnow().isoformat(),
                             'transfers': [],
-                            'balance_change': balance_change  # Add balance change to transaction data
+                            'balance_change': balance_change
                         }
                     
                     if tx['type'] == 'token_transfer':
                         tx_matches[tx_hash]['transfers'].append({
+                            'wallet': wallet,
+                            'wallet_name': wallet_name,
                             'type': 'token_transfer',
                             'activity_type': tx.get('activity_type', 'token_transfer_in'),
                             'token': tx.get('token'),
@@ -563,6 +569,8 @@ class WalletWatcher(BaseWatcher):
                         })
                     elif tx['type'] == 'native_transfer':
                         tx_matches[tx_hash]['transfers'].append({
+                            'wallet': wallet,
+                            'wallet_name': wallet_name,
                             'type': 'native_transfer',
                             'activity_type': tx.get('activity_type'),
                             'amount': tx.get('value'),
@@ -573,6 +581,7 @@ class WalletWatcher(BaseWatcher):
                     elif tx['type'] == 'token_trade':
                         matches.append({
                             'wallet': wallet,
+                            'wallet_name': wallet_name,
                             'chain': chain,
                             'activity_type': 'token_trade',
                             'token_in': tx.get('token_in'),
@@ -608,6 +617,7 @@ class WalletWatcher(BaseWatcher):
                             # This is a token purchase (native token sent, token received)
                             matches.append({
                                 'wallet': tx_data['wallet'],
+                                'wallet_name': tx_data['wallet_name'],
                                 'chain': tx_data['chain'],
                                 'activity_type': 'token_trade',
                                 'token_in': 'native',
@@ -628,6 +638,7 @@ class WalletWatcher(BaseWatcher):
                             # This is a token sell (token sent, native token received)
                             matches.append({
                                 'wallet': tx_data['wallet'],
+                                'wallet_name': tx_data['wallet_name'],
                                 'chain': tx_data['chain'],
                                 'activity_type': 'token_trade',
                                 'token_in': token_transfer['token'],
@@ -648,6 +659,7 @@ class WalletWatcher(BaseWatcher):
                             # Regular token transfer
                             matches.append({
                                 'wallet': tx_data['wallet'],
+                                'wallet_name': tx_data['wallet_name'],
                                 'chain': tx_data['chain'],
                                 'activity_type': token_transfer['activity_type'],
                                 'token': token_transfer['token'],
@@ -667,6 +679,7 @@ class WalletWatcher(BaseWatcher):
                             if transfer['type'] == 'native_transfer':
                                 matches.append({
                                     'wallet': tx_data['wallet'],
+                                    'wallet_name': tx_data['wallet_name'],
                                     'chain': tx_data['chain'],
                                     'activity_type': transfer['activity_type'],
                                     'amount': transfer['amount'],
@@ -764,6 +777,7 @@ class WalletWatcher(BaseWatcher):
                             'type': 'token_trade',
                             'hash': tx_hash,
                             'wallet': wallet,
+                            'wallet_name': wallet,
                             'token_in': token_in['address'],
                             'token_in_name': token_in['name'],
                             'token_in_symbol': token_in['symbol'],
@@ -782,6 +796,7 @@ class WalletWatcher(BaseWatcher):
                             'type': 'token_trade',
                             'hash': tx_hash,
                             'wallet': wallet,
+                            'wallet_name': wallet,
                             'token_in': 'native',
                             'token_in_name': chain.upper(),
                             'token_in_symbol': self.config.get_native_symbol(chain),
@@ -826,6 +841,8 @@ class WalletWatcher(BaseWatcher):
                                         'type': 'native_transfer',
                                         'activity_type': 'native_transfer_out',
                                         'hash': log['transactionHash'],
+                                        'wallet': wallet,
+                                        'wallet_name': wallet,
                                         'from': from_address,
                                         'to': to_address,
                                         'value': int(log['value'], 16),
@@ -841,6 +858,7 @@ class WalletWatcher(BaseWatcher):
                             'type': 'token_trade',
                             'hash': tx_hash,
                             'wallet': wallet,
+                            'wallet_name': wallet,
                             'token_in': 'native',
                             'token_in_name': chain.upper(),
                             'token_in_symbol': self.config.get_native_symbol(chain),
@@ -1014,6 +1032,8 @@ class WalletWatcher(BaseWatcher):
                 'type': 'token_transfer',
                 'activity_type': activity_type,
                 'hash': log['transactionHash'],  # Already hex string
+                'wallet': wallet,
+                'wallet_name': wallet,
                 'token': log['address'],
                 'token_name': token_metadata['name'],
                 'token_symbol': token_metadata['symbol'],
@@ -1022,8 +1042,7 @@ class WalletWatcher(BaseWatcher):
                 'value': value,
                 'formatted_amount': formatted_amount,
                 'block_number': int(log['blockNumber'], 16),  # Convert hex to int
-                'chain': chain,
-                'wallet': wallet  # Add wallet address for matcher
+                'chain': chain
             }
         except Exception as e:
             logger.error(f"[WalletWatcher] Error processing token transfer: {e}", exc_info=True)
@@ -1063,6 +1082,8 @@ class WalletWatcher(BaseWatcher):
                     'type': 'nft_transfer',
                     'standard': 'ERC1155',
                     'hash': log['transactionHash'],  # Already hex string
+                    'wallet': wallet,
+                    'wallet_name': wallet,
                     'collection': log['address'],
                     'from': from_address,
                     'to': to_address,
@@ -1087,6 +1108,8 @@ class WalletWatcher(BaseWatcher):
                         'type': 'nft_transfer',
                         'standard': 'ERC1155',
                         'hash': log['transactionHash'],  # Already hex string
+                        'wallet': wallet,
+                        'wallet_name': wallet,
                         'collection': log['address'],
                         'from': from_address,
                         'to': to_address,
@@ -1096,7 +1119,7 @@ class WalletWatcher(BaseWatcher):
                     }
         except Exception as e:
             logger.error(f"[WalletWatcher] Error processing ERC1155 transfer: {e}", exc_info=True)
-            return None 
+            return None
 
     async def initialize_cache(self, targets: List[str]):
         """Initialize cache for new wallets"""
