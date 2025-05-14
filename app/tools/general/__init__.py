@@ -21,10 +21,17 @@ async def get_token_price_tool(asset: str) -> dict:
     Input:
     - asset: token name, symbol, or contract address (EVM/Solana)
 
-    "Get full market info for any token including price, market cap, sentiment, and breakout signals. "
-    "Always use the 'summary' field in the result to reply directly to the user."
+    Description:
+    Get full market info for any token including price, market cap, sentiment, and breakout signals.
 
-    Response format markdown
+    Response format:
+    Return a dictionary that includes at least the field `summary`, which should be a concise natural language string.
+    This string must:
+    - Present the token's current price and market cap in a human-readable format.
+    - Optionally include all-time high (ATH), 24h change, and basic sentiment info (e.g., % bullish/bearish).
+    - Provide a short and professional assessment of the token’s current trend or status (e.g., "showing early signs of a breakout" or "currently facing downward pressure").
+
+    Always write the `summary` to be used directly in user replies without further formatting.
     """
     try:
         return await get_token_price(asset)

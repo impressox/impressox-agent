@@ -55,6 +55,13 @@ class GlobalConfig(BaseSettings):
     LLM_URL: Optional[str] = Field(None, env="LLM_URL")
     VECTOR_STORE_URL: Optional[str] = Field(None, env="VECTOR_STORE_URL")
     
+    # Blockchain URLs
+    ETHEREUM_RPC_URL: Optional[str] = Field(None, env="ETHEREUM_RPC_URL")
+    BSC_RPC_URL: Optional[str] = Field(None, env="BSC_RPC_URL")
+    BASE_RPC_URL: Optional[str] = Field(None, env="BASE_RPC_URL")
+    SOLANA_RPC_URL: Optional[str] = Field(None, env="SOLANA_RPC_URL")
+    TELEGRAM_BOT_TOKEN: Optional[str] = Field(None, env="TELEGRAM_BOT_TOKEN")
+    
     # Config files for production
     API_CONF: Dict[str, Any] = ConfigReaderInstance.yaml.read_config_from_file("configs/api.yaml")
     ELK_CONF: Dict[str, Any] = ConfigReaderInstance.yaml.read_config_from_file("configs/logging.yaml")
@@ -65,6 +72,7 @@ class GlobalConfig(BaseSettings):
     MYSQL_CONF: Dict[str, Any] = ConfigReaderInstance.yaml.read_config_from_file("configs/mysql.yaml")
     VECTOR_STORE_CONF: Dict[str, Any] = ConfigReaderInstance.yaml.read_config_from_file("configs/vector_store.yaml")
     EMBEDDER_CONF: Dict[str, Any] = ConfigReaderInstance.yaml.read_config_from_file("configs/embedder.yaml")
+    BLOCKCHAIN_CONF: Dict[str, Any] = ConfigReaderInstance.yaml.read_config_from_file("configs/blockchain.yaml")
 
     class Config:
         """Loads the dotenv file."""
@@ -123,6 +131,26 @@ class GlobalConfig(BaseSettings):
     def get_embedder_config(self) -> Dict[str, Any]:
         """Get embedder configuration."""
         return self.EMBEDDER_CONF
+
+    def get_blockchain_config(self) -> Dict[str, Any]:
+        """Get blockchain configuration.
+        Returns URL config in dev mode, file config in prod mode."""
+        config = self.BLOCKCHAIN_CONF.copy()
+        
+        # Replace environment variables in dev mode
+        if self.ENV_STATE == "dev":
+            if self.ETHEREUM_RPC_URL:
+                config["blockchain"]["ethereum"]["rpc_url"] = self.ETHEREUM_RPC_URL
+            if self.BSC_RPC_URL:
+                config["blockchain"]["bsc"]["rpc_url"] = self.BSC_RPC_URL
+            if self.BASE_RPC_URL:
+                config["blockchain"]["base"]["rpc_url"] = self.BASE_RPC_URL
+            if self.SOLANA_RPC_URL:
+                config["blockchain"]["solana"]["rpc_url"] = self.SOLANA_RPC_URL
+            if self.TELEGRAM_BOT_TOKEN:
+                config["notification"]["telegram"]["bot_token"] = self.TELEGRAM_BOT_TOKEN
+                
+        return config
 
 class DevConfig(GlobalConfig):
     """Development configurations."""

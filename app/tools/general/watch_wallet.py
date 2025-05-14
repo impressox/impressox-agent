@@ -8,6 +8,7 @@ import logging
 from functools import partial
 import base58
 from eth_utils import is_address
+from web3 import Web3
 
 from app.utils.call_api import call_api 
 from app.cache.cache_redis import get_redis_client
@@ -27,6 +28,13 @@ class MongoJSONEncoder(json.JSONEncoder):
         if isinstance(obj, ObjectId):
             return str(obj)
         return super().default(obj)
+
+def get_config():
+    """Get configuration for blockchain and notification settings."""
+    from app.configs.config import app_configs
+    
+    config = app_configs.get_blockchain_config()
+    return config
 
 def generate_rule_id() -> str:
     """Generate unique rule ID"""
@@ -62,13 +70,17 @@ def validate_wallet_address(address: str) -> tuple[bool, str]:
 
 @register_tool(NodeName.GENERAL_NODE, "watch_wallet")
 @tool
-async def watch_wallet(wallets: Optional[List[str]] = None, conditions: Optional[Dict] = None, runable_config: RunnableConfig = None) -> Dict[str, Any]:
+async def watch_wallet(wallets: Optional[List[Dict[str, str]]] = None, conditions: Optional[Dict] = None, runable_config: RunnableConfig = None) -> Dict[str, Any]:
     """
     Tool để đăng ký theo dõi hoạt động của một hoặc nhiều ví (ví dụ: chuyển token, nhận token, giao dịch NFT).
     Khi có hoạt động liên quan đến các ví này, hệ thống sẽ chủ động thông báo cho bạn qua kênh đã kết nối (Telegram, Web, Discord).
 
     Args:
-        wallets: Danh sách các địa chỉ ví muốn theo dõi.
+        wallets: Danh sách các ví muốn theo dõi. Mỗi ví là một dict với format:
+                {
+                    "address": "địa_chỉ_ví",
+                    "name": "tên_ví" (optional)
+                }
         conditions: Điều kiện theo dõi (ví dụ: {"min_amount": 1.0} để theo dõi khi số lượng token > 1.0).
                    Nếu không có điều kiện -> theo dõi mọi hoạt động.
     Returns:
@@ -83,7 +95,7 @@ async def watch_wallet(wallets: Optional[List[str]] = None, conditions: Optional
             "message": f"Lỗi khi xử lý yêu cầu: {str(e)}"
         }
 
-async def _watch_wallet_async(wallets: Optional[List[str]] = None, conditions: Optional[Dict] = None, runable_config: RunnableConfig = None) -> Dict[str, Any]:
+async def _watch_wallet_async(wallets: Optional[List[Dict[str, str]]] = None, conditions: Optional[Dict] = None, runable_config: RunnableConfig = None) -> Dict[str, Any]:
     """
     Async implementation of watch_wallet tool
     """
@@ -99,24 +111,40 @@ async def _watch_wallet_async(wallets: Optional[List[str]] = None, conditions: O
             "message": "Vui lòng cung cấp ít nhất một địa chỉ ví để theo dõi"
         }
 
-    # Validate wallets
+    # Validate wallets and resolve ENS names
     valid_wallets = []
     invalid_wallets = []
     
-    for wallet in wallets:
-        is_valid, wallet_type = validate_wallet_address(wallet)
+    for wallet_info in wallets:
+        address = wallet_info.get("address")
+        name = wallet_info.get("name")
+        
+        is_valid, wallet_type = validate_wallet_address(address)
         if is_valid:
+            # If no name provided and it's an Ethereum address, try to resolve ENS
+            if not name and wallet_type == "evm":
+                try:
+                    # Initialize Web3 with Ethereum RPC
+                    w3 = Web3(Web3.HTTPProvider(get_config().get_rpc_url("ethereum")))
+                    if w3.is_connected():
+                        ens_name = w3.ens.name(address)
+                        if ens_name:
+                            name = ens_name
+                except Exception as e:
+                    logger.warning(f"[WatchWallet] Error resolving ENS for {address}: {e}")
+            
             valid_wallets.append({
-                "address": wallet,
+                "address": address,
+                "name": name or address,  # Use address as name if no name/ENS found
                 "type": wallet_type
             })
         else:
-            invalid_wallets.append(wallet)
+            invalid_wallets.append(address)
 
     if not valid_wallets:
         return {
             "success": False,
-            "message": f"Không tìm thấy địa chỉ ví hợp lệ trong danh sách: {', '.join(wallets)}"
+            "message": f"Không tìm thấy địa chỉ ví hợp lệ trong danh sách: {', '.join(invalid_wallets)}"
         }
 
     # Create watch rule
@@ -129,6 +157,7 @@ async def _watch_wallet_async(wallets: Optional[List[str]] = None, conditions: O
         "target_data": {
             w["address"]: {
                 "address": w["address"],
+                "name": w["name"],
                 "type": w["type"]
             } for w in valid_wallets
         },

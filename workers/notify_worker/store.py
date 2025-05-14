@@ -3,6 +3,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 from dotenv import load_dotenv
 import logging
+import json
 
 # Configure logging
 logging.basicConfig(
@@ -37,6 +38,25 @@ except Exception as e:
 
 ACTIVE_USERS_SET = 'notification_active_users'
 
+async def initialize_active_users():
+    """Load all active users from MongoDB into Redis when worker starts"""
+    try:
+        logger.info("Loading active users from MongoDB...")
+        # Find all users with active=True
+        cursor = users_col.find({'active': True}, {'telegram_id': 1})
+        active_users = [str(doc['telegram_id']) async for doc in cursor]
+        
+        if active_users:
+            # Add all active users to Redis set
+            await redis_client.sadd(ACTIVE_USERS_SET, *active_users)
+            logger.info(f"Loaded {len(active_users)} active users from MongoDB to Redis")
+        else:
+            logger.info("No active users found in MongoDB")
+            
+    except Exception as e:
+        logger.error(f"Error loading active users from MongoDB: {str(e)}")
+        raise
+
 async def get_active_users():
     try:
         logger.info("Fetching active users from Redis")
@@ -63,8 +83,20 @@ async def get_active_users():
         raise
 
 async def add_active_user(user_id):
-    await redis_client.sadd(ACTIVE_USERS_SET, user_id)
-    await users_col.update_one({'telegram_id': int(user_id)}, {'$set': {'active': True}}, upsert=True)
+    """Add a user to active users and push their rules back to Redis"""
+    try:
+        # Add to Redis set
+        await redis_client.sadd(ACTIVE_USERS_SET, user_id)
+        
+        # Update MongoDB
+        await users_col.update_one(
+            {'telegram_id': int(user_id)}, 
+            {'$set': {'active': True}}, 
+            upsert=True
+        )
+    except Exception as e:
+        logger.error(f"Error adding active user {user_id}: {str(e)}")
+        raise
 
 async def remove_active_user(user_id):
     await redis_client.srem(ACTIVE_USERS_SET, user_id)

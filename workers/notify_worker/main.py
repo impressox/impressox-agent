@@ -2,6 +2,7 @@ import asyncio
 import logging
 from workers.notify_worker.scheduler import schedule_notify
 from workers.notify_worker.redis_listener import listen_notify_control
+from workers.notify_worker.store import initialize_active_users
 
 # Configure logging
 logging.basicConfig(
@@ -13,6 +14,12 @@ logger = logging.getLogger(__name__)
 async def main():
     try:
         logger.info("Starting notify worker...")
+        
+        # Initialize active users from MongoDB
+        logger.info("Initializing active users...")
+        await initialize_active_users()
+        logger.info("Active users initialized successfully")
+        
         logger.info("Initializing scheduler...")
         schedule_notify()
         logger.info("Scheduler started successfully")

@@ -232,11 +232,12 @@ def analyze_breakout_and_volatility(ohlc_grouped, group_size):
     previous = ohlc_grouped[-2]
 
     if latest[4] > previous[2]:
-        signal = "Breakout tăng"
+        signal = "Bullish breakout"
     elif latest[4] < previous[3]:
-        signal = "Breakout giảm"
+        signal = "Bearish breakout"
     else:
-        signal = "Không breakout"
+        signal = "No breakout"
+
 
     avg_range = sum([row[2] - row[3] for row in ohlc_grouped]) / len(ohlc_grouped)
 
