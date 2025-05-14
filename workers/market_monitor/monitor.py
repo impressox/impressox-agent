@@ -9,7 +9,6 @@ from workers.market_monitor.services.base import BaseWatcher
 from workers.market_monitor.shared.redis_utils import RedisClient
 from workers.market_monitor.utils.config import get_config
 from workers.market_monitor.utils.mongo import MongoClient
-from workers.market_monitor.services.notification_service import NotificationService
 from workers.market_monitor.processors.rule_matcher import RuleMatcher
 from workers.market_monitor.processors.notify_dispatcher import NotifyDispatcher
 from workers.market_monitor.processors.rule_processor import RuleProcessor
@@ -36,7 +35,6 @@ class MarketMonitor:
     def __init__(self):
         self.worker_pool = None
         self.redis_client = None
-        self.notification_service = None
         self.rule_matcher = None
         self.notify_dispatcher = None
         self.rule_processor = None
@@ -58,12 +56,6 @@ class MarketMonitor:
             logger.info("[MarketMonitor] Connecting to MongoDB...")
             await MongoClient.get_instance()
             logger.info("[MarketMonitor] MongoDB connection established")
-            
-            # Initialize notification service
-            logger.info("[MarketMonitor] Starting notification service...")
-            self.notification_service = NotificationService()
-            await self.notification_service.start()
-            logger.info("[MarketMonitor] Notification service started")
             
             # Initialize processors
             logger.info("[MarketMonitor] Initializing processors...")

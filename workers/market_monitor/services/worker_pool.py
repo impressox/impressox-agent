@@ -10,7 +10,6 @@ from workers.market_monitor.services.base import BaseWatcher
 from workers.market_monitor.services.token_watcher import TokenWatcher
 from workers.market_monitor.services.wallet_watcher import WalletWatcher
 from workers.market_monitor.services.airdrop_watcher import AirdropWatcher
-from workers.market_monitor.services.notification_service import NotificationService
 from workers.market_monitor.shared.redis_utils import RedisClient
 from workers.market_monitor.utils.config import get_config
 
@@ -20,7 +19,6 @@ class WorkerPool:
     def __init__(self):
         self.workers: Dict[str, BaseWatcher] = {}
         self.redis_client = None
-        self.notification_service = None
         self.config = get_config()
         self.worker_status = {}
         self.last_health_check = None
@@ -31,11 +29,6 @@ class WorkerPool:
             # Initialize Redis client
             self.redis_client = await RedisClient.get_instance()
             logger.info("[WorkerPool] Redis client initialized")
-            
-            # Initialize notification service
-            self.notification_service = NotificationService()
-            await self.notification_service.start()
-            logger.info("[WorkerPool] Notification service started")
             
             # Initialize default workers
             logger.info("[WorkerPool] Initializing default workers...")
@@ -83,10 +76,6 @@ class WorkerPool:
                     logger.error(f"[WorkerPool] Error stopping worker {worker_id}: {e}")
             self.workers.clear()
             
-            # Stop notification service
-            if self.notification_service:
-                await self.notification_service.stop()
-                
             # Close Redis connection
             if self.redis_client:
                 await RedisClient.close()
