@@ -15,26 +15,61 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 schedule_interval = int(os.getenv('SCHEDULE_INTERVAL', "1"))
-social_sentiment_interval = int(os.getenv('SOCIAL_SENTIMENT_INTERVAL', "1"))
+social_sentiment_interval = int(os.getenv('SOCIAL_SENTIMENT_INTERVAL', "4"))
 
-# Redis key for storing last sentiment hash
+# Redis keys for storing hashes
 LAST_SENTIMENT_HASH_KEY = 'last_sentiment_hash'
+AIRDROP_HASHES_SET = 'airdrop_notification_hashes'
 
 async def scheduled_job():
     try:
         logger.info("Starting scheduled notification job")
         
         logger.info("Fetching market alerts...")
-        alerts = await fetch_alerts()
-        logger.info(f"Fetched {len(alerts)} market alerts")
+        # alerts = await fetch_alerts()
+        # logger.info(f"Fetched {len(alerts)} market alerts")
         
         logger.info("Fetching airdrop alerts...")
-        airdrops = await fetch_airdrop_alerts()
-        logger.info(f"Fetched {len(airdrops)} airdrop alerts")
+        airdrops_data = await fetch_airdrop_alerts()
+        logger.info(f"Fetched airdrop alerts data: {airdrops_data}")
         
-        logger.info("Sending notifications...")
-        await notify_users(alerts, airdrops)
-        logger.info("Notifications sent successfully")
+        # Filter out duplicate airdrops
+        unique_airdrops = []
+        if airdrops_data and isinstance(airdrops_data, dict) and 'airdrops' in airdrops_data:
+            for airdrop in airdrops_data['airdrops']:
+                logger.info(f"Processing airdrop: {airdrop}")
+                if not isinstance(airdrop, dict):
+                    logger.warning(f"Invalid airdrop data: {airdrop}")
+                    continue
+                    
+                # Create a hash of the airdrop text
+                airdrop_text = airdrop.get('text', '')
+                if not airdrop_text:
+                    continue
+                    
+                airdrop_hash = hashlib.md5(airdrop_text.encode()).hexdigest()
+                
+                # Check if this hash exists in Redis
+                is_duplicate = await redis_client.sismember(AIRDROP_HASHES_SET, airdrop_hash)
+                
+                if not is_duplicate:
+                    # Add to unique airdrops and store hash in Redis
+                    unique_airdrops.append({
+                        'alert_type': 'airdrop',
+                        'text': airdrop_text,
+                        'post_link': airdrop.get('post_link', '')
+                    })
+                    await redis_client.sadd(AIRDROP_HASHES_SET, airdrop_hash)
+                    # Set expiration for the hash (e.g., 7 days)
+                    await redis_client.expire(AIRDROP_HASHES_SET, 7 * 24 * 60 * 60)
+        logger.info(f"Unique airdrops: {unique_airdrops}")
+        if unique_airdrops and len(unique_airdrops) > 0:
+            logger.info(f"Sending notifications for {len(unique_airdrops)} unique airdrops...")
+            await notify_users([], unique_airdrops)
+            logger.info("Notifications sent successfully")
+        else:
+            logger.info("No new unique airdrops to notify")
+            
     except Exception as e:
         logger.error(f"Error in scheduled job: {str(e)}")
         raise
@@ -77,7 +112,7 @@ def schedule_notify():
         asyncio.set_event_loop(loop)
         
         # Add the regular notification job
-        # scheduler.add_job(scheduled_job, 'interval', minutes=schedule_interval)
+        scheduler.add_job(scheduled_job, 'interval', hours=schedule_interval)
         
         # Add the social sentiment job (every 4 hours)
         scheduler.add_job(social_sentiment_job, 'interval', hours=social_sentiment_interval)

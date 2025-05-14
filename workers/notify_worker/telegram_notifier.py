@@ -28,7 +28,8 @@ ALERT_TYPE_MAP = {
     'coin': '💹 <b>Coin Alerts</b>',
     'claim': '✅ <b>Claim Opportunities</b>',
     'rumor': '🤫 <b>Market Rumors</b>',
-    'social': '📊 <b>Market Sentiment Analysis</b>'
+    'social': '📊 <b>Market Sentiment Analysis</b>',
+    'airdrop': '💰 <b>Airdrop Detected</b>'
 }
 
 def format_message(alerts, airdrops):
@@ -43,17 +44,20 @@ def format_message(alerts, airdrops):
         for k, v in grouped.items():
             title = ALERT_TYPE_MAP.get(k, f'📌 <b>{k.capitalize()}</b>')
             section = [title]
+            logger.info(f"Processing {k} alerts: {v}")
             for item in v:
                 if k == 'social':
                     # For social sentiment, just use the text directly
                     section.append(item.get('text', ''))
+                elif k == 'airdrop':
+                    section.append(f"• {item.get('text', '')}")
                 else:
                     text = item.get('text', '')
-                    post_link = item.get('post_link', '')
-                    if post_link:
-                        section.append(f'<a href="{post_link}">View</a>')
-                    else:
-                        section.append(text)
+                    # post_link = item.get('post_link', '')
+                    # if post_link:
+                    #     section.append(f'<a href="{post_link}">View</a>')
+                    # else:
+                    section.append(text)
             parts.append('\n'.join(section))
         
         message = '\n\n'.join(parts)
