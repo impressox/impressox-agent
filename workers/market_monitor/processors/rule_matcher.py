@@ -176,7 +176,10 @@ class RuleMatcher:
                     if condition == "alert":
                         # For alert messages, use the message directly
                         msg = m.get("message", "")
-                        if not msg:
+                        if msg:
+                            # Just use the message and link, without header
+                            msg = f"• {msg}"
+                        else:
                             continue
                     else:
                         token = m["token"]
@@ -252,7 +255,7 @@ class RuleMatcher:
                         msg += f"• From: <a href='{scan_url}/address/{from_address}'>{from_address}</a>\n"
                         msg += f"• To: <a href='{scan_url}/address/{to_address}'>{to_address}</a>\n"
                         msg += f"• Type: ERC-20\n"
-                        msg += f"• Token: <code>{token}</code> (<a href='{scan_url}/token/{token}'>View</a>)\n"
+                        msg += f"• CA: <a href='{scan_url}/token/{token}'>{token}</a>\n"
                         msg += f"• Amount: {amount} {token_symbol} ({token_name})\n"
                         msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>"
                     elif activity_type == "token_transfer_out":
@@ -270,34 +273,56 @@ class RuleMatcher:
                         msg += f"• From: <a href='{scan_url}/address/{from_address}'>{from_address}</a>\n"
                         msg += f"• To: <a href='{scan_url}/address/{to_address}'>{to_address}</a>\n"
                         msg += f"• Type: ERC-20\n"
-                        msg += f"• Token: <code>{token}</code> (<a href='{scan_url}/token/{token}'>View</a>)\n"
+                        msg += f"• CA: <a href='{scan_url}/token/{token}'>{token}</a>\n"
                         msg += f"• Amount: {amount} {token_symbol} ({token_name})\n"
                         msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>"
                     elif activity_type == "token_trade":
                         token_in = m.get("token_in", "Unknown")
-                        token_in_name = m.get("token_in_name", "Unknown")
+                        token_in_name = m.get("token_in_name", "Unknown Token")
                         token_in_symbol = m.get("token_in_symbol", "Unknown")
                         token_out = m.get("token_out", "Unknown")
-                        token_out_name = m.get("token_out_name", "Unknown")
+                        token_out_name = m.get("token_out_name", "Unknown Token")
                         token_out_symbol = m.get("token_out_symbol", "Unknown")
                         amount_in = m.get("formatted_amount_in", m.get("amount_in", "N/A"))
                         amount_out = m.get("formatted_amount_out", m.get("amount_out", "N/A"))
                         tx_hash = m.get("hash", "")
                         scan_url = self.config.get_scan_url(chain)
-                        
-                        if token_out == "native":
-                            msg = f"🔔 <b>Token Trade (Sold)</b> on <b>{chain.upper()}</b>\n"
+
+                        if chain == "solana":
+                            if m.get("side") == "buy":
+                                msg = f"🔔 <b>Buy Token</b> on <b>{chain.upper()}</b>\n"
+                            else:
+                                msg = f"🔔 <b>Sell Token</b> on <b>{chain.upper()}</b>\n"
                             msg += f"• Wallet: <a href='{scan_url}/address/{wallet}'>{wallet_name}</a>\n"
-                            msg += f"• Sold: {amount_in} {token_in_symbol} ({token_in_name})\n"
-                            msg += f"• Received: {amount_out} {token_out_symbol}\n"
-                            msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>"
+                            
+                            if token_in:
+                                msg += f"• Token In: {token_in_name}\n" if token_in == "native" else f"• Token In: <a href='{scan_url}/token/{token_in}'>{token_in_name}</a>\n"
+                                msg += f"• Amount In: {amount_in} {token_in_symbol}\n"
+                                msg += f"• CA: <code>{token_in}</code>\n" if token_in != "native" else ""
+                            
+                            if token_out:
+                                msg += f"• Token Out: {token_out_name}\n" if token_out == "native" else f"• Token Out: <a href='{scan_url}/token/{token_out}'>{token_out_name}</a>\n"
+                                msg += f"• Amount Out: {amount_out} {token_out_symbol}\n"
+                                msg += f"• CA: <code>{token_out}</code>\n" if token_out != "native" else ""
+                            
+                            msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>\n"
+                            msg += f"• Dex: {m.get('dex_name', 'Unknown')}\n"
+                            msg += f"• Fee: {m.get('fee', 'N/A')} SOL\n"
                         else:
-                            msg = f"🔔 <b>Token Trade (Swapped)</b> on <b>{chain.upper()}</b>\n"
-                            msg += f"• Wallet: <a href='{scan_url}/address/{wallet}'>{wallet_name}</a>\n"
-                            msg += f"• Sold: {amount_in} {token_in_symbol} ({token_in_name})\n"
-                            msg += f"• Bought: {amount_out} {token_out_symbol} ({token_out_name})\n"
-                            msg += f"• CA: <code>{token_out}</code>\n"
-                            msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>"
+                            # EVM chains
+                            if token_out == "native":
+                                msg = f"🔔 <b>Token Sold</b> on <b>{chain.upper()}</b>\n"
+                                msg += f"• Wallet: <a href='{scan_url}/address/{wallet}'>{wallet_name}</a>\n"
+                                msg += f"• Sold: {amount_in} {token_in_symbol} ({token_in_name})\n"
+                                msg += f"• Received: {amount_out} {token_out_symbol}\n"
+                                msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>"
+                            else:
+                                msg = f"🔔 <b>Token Swapped</b> on <b>{chain.upper()}</b>\n"
+                                msg += f"• Wallet: <a href='{scan_url}/address/{wallet}'>{wallet_name}</a>\n"
+                                msg += f"• Sold: {amount_in} {token_in_symbol} ({token_in_name})\n"
+                                msg += f"• Bought: {amount_out} {token_out_symbol} ({token_out_name})\n"
+                                msg += f"• CA: <code>{token_out}</code>\n"
+                                msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>"
                     elif activity_type == "nft_trade":
                         collection = m.get("collection", "Unknown")
                         token_id = m.get("token_id", "Unknown")
@@ -310,26 +335,31 @@ class RuleMatcher:
                         msg += f"🔸 Amount: {token_amount} {token_symbol}\n"
                         msg += f"🔸 TX: <a href='{scan_url}{tx_hash}'>{tx_hash}</a>"
                     elif activity_type == "solana_transfer":
+                        # Handle Solana native transfers
                         amount = m.get("amount", "N/A")
                         fee = m.get("fee", "N/A")
-                        tx_hash = m.get("tx_hash", "")
+                        tx_hash = m.get("hash", "")
                         scan_url = self.config.get_scan_url(chain)
-                        msg = f"<b>{wallet}</b> on {chain.upper()}\n"
-                        msg += f"🔸 Amount: {amount} SOL\n"
-                        msg += f"🔸 Fee: {fee} SOL\n"
-                        msg += f"🔸 TX: <a href='{scan_url}{tx_hash}'>{tx_hash}</a>"
+                        
+                        msg = f"🔔 <b>Native Transfer</b> on <b>{chain.upper()}</b>\n"
+                        msg += f"• Wallet: <a href='{scan_url}/address/{wallet}'>{wallet_name}</a>\n"
+                        msg += f"• Amount: {amount} SOL\n"
+                        msg += f"• Fee: {fee} SOL\n"
+                        msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>"
                     else:
                         # Default message for unknown activity type
                         msg = f"<b>{wallet}</b> on {chain.upper()}: {activity_type}"
                 
                 elif watch_type == "airdrop":
-                    project = m["project"]
-                    if condition == "airdrop_announced":
-                        msg = f"<b>{project}</b> announced new airdrop"
-                    elif condition == "airdrop_started":
-                        msg = f"<b>{project}</b> airdrop has started"
-                    elif condition == "airdrop_ended":
-                        msg = f"<b>{project}</b> airdrop has ended"
+                    if condition == "alert":
+                        # For airdrop alerts, use the message and post_link
+                        msg = m.get("message", "")
+                        if msg:
+                            # Just use the message and link, without header
+                            msg = f"• {msg}"
+                    else:
+                        # Skip other conditions for now
+                        continue
                 
                 elif condition == "alert":
                     # For alert messages, use the message directly
@@ -345,6 +375,12 @@ class RuleMatcher:
 
             if not messages:
                 return None
+
+            # Add header for airdrop notifications
+            if watch_type == "airdrop":
+                messages.insert(0, "🔔 <b>Airdrop Alert</b>")
+            elif watch_type == "market":
+                messages.insert(0, "🔔 <b>Market Alert</b>")
 
             return Notification(
                 user=rule.notify_id,

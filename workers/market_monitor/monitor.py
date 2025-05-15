@@ -195,6 +195,11 @@ class MarketMonitor:
                 
             # Stop worker pool
             if self.worker_pool:
+                # Cleanup Web3 connections
+                workers = await self.worker_pool.get_workers()
+                for worker in workers:
+                    if hasattr(worker, 'cleanup'):
+                        await worker.cleanup()
                 await self.worker_pool.stop()
                 
             # Close Redis connection

@@ -151,7 +151,9 @@ class NotifyDispatcher:
                     # Delete old key and create new one with current timestamps
                     await self.redis.delete(key)
                     if current_timestamps:
-                        await self.redis.hmset(key, current_timestamps)
+                        # Use hset instead of hmset
+                        for k, v in current_timestamps.items():
+                            await self.redis.hset(key, k, v)
             else:
                 message_count = 0
             

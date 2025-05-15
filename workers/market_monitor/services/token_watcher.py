@@ -1,7 +1,7 @@
 # services/token_watcher.py
 
-import asyncio
 import json
+import os
 import logging
 from typing import Dict, List, Optional
 from bson import ObjectId
@@ -20,6 +20,7 @@ class TokenWatcher(BaseWatcher):
         self.price_cache = {}  # Cache token prices to detect changes
         self.watch_type = "market"
         self.config = get_config()
+        self.watch_interval = int(os.getenv("TOKEN_WATCH_INTERVAL", 30))  # Check more frequently for tokens
 
     def _serialize_to_json(self, data):
         """Helper method to serialize data to JSON string"""

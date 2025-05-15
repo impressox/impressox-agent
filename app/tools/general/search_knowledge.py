@@ -3,10 +3,11 @@ from langchain_core.tools import tool
 from app.core.tool_registry import register_tool
 from app.constants import NodeName
 from app.core.vector_store import VectorStoreManager
+from app.core.mongo_search import MongoSearch
 
 async def search_knowledge(query: str, top_k: int = 10, source: Optional[str] = "twitter") -> Dict:
     """
-    Search for relevant knowledge from vector store based on user query
+    Search for relevant knowledge from vector store and MongoDB based on user query
     
     Args:
         query (str): The search query from user
@@ -24,28 +25,59 @@ async def search_knowledge(query: str, top_k: int = 10, source: Optional[str] = 
         where = {"source": source}
         
         # Search vector store
-        results = vector_store.search(
+        vector_results = vector_store.search(
             query=query,
             n_results=top_k,
             where=where
         )
         
-        # Format results
-        formatted_results = []
-        if results and len(results) > 0:
-            for doc in results:
-                formatted_results.append({
+        # Get MongoDB search instance
+        mongo_search = await MongoSearch.get_instance()
+        
+        # Search MongoDB
+        mongo_results = await mongo_search.search(
+            query=query,
+            top_k=top_k,
+            source=source
+        )
+        
+        # Format vector store results
+        formatted_vector_results = []
+        if vector_results and len(vector_results) > 0:
+            for doc in vector_results:
+                formatted_vector_results.append({
                     "content": doc.get("text", ""),
                     "metadata": doc.get("metadata", {}),
                     "relevance_score": 1.0 - doc.get("distance", 0.0)  # Convert distance to similarity score
                 })
+        
+        # Combine results
+        all_results = []
+        
+        # Add vector store results
+        all_results.extend(formatted_vector_results)
+        
+        # Add MongoDB results if successful
+        if mongo_results.get("success", False):
+            all_results.extend(mongo_results["data"]["results"])
+        
+        # Sort by relevance score and remove duplicates
+        seen_contents = set()
+        unique_results = []
+        for result in sorted(all_results, key=lambda x: x["relevance_score"], reverse=True):
+            content = result["content"]
+            if content not in seen_contents:
+                seen_contents.add(content)
+                unique_results.append(result)
+                if len(unique_results) >= top_k:
+                    break
             
         return {
             "success": True,
             "data": {
-                "results": formatted_results,
+                "results": unique_results,
                 "query": query,
-                "total_results": len(formatted_results)
+                "total_results": len(unique_results)
             }
         }
         

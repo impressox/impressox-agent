@@ -1,7 +1,7 @@
 import os
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import yaml
 from pydantic_settings import BaseSettings
 from pydantic import Field
@@ -40,6 +40,8 @@ class Config(BaseSettings):
     api: Dict[str, Any] = Field(default_factory=dict)
     notification: Dict[str, Any] = Field(default_factory=dict)
     blockchain: Dict[str, Any] = Field(default_factory=dict)
+    dex_routers: Dict[str, List[str]] = Field(default_factory=dict)
+    erc20_abi: List[Dict[str, Any]] = Field(default_factory=list)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -49,6 +51,9 @@ class Config(BaseSettings):
         self.api = self._load_api_config()
         self.notification = self._load_notification_config()
         self.blockchain = self._load_blockchain_config()
+        # Set dex_routers and erc20_abi from blockchain config
+        self.dex_routers = self.blockchain.get("dex_routers", {})
+        self.erc20_abi = self.blockchain.get("erc20_abi", [])
 
     def _load_redis_config(self) -> Dict[str, Any]:
         """Load Redis configuration"""
@@ -210,7 +215,27 @@ class Config(BaseSettings):
                     "max_retries": int(os.environ.get("BLOCKCHAIN_MAX_RETRIES", "3")),
                     "retry_delay": int(os.environ.get("BLOCKCHAIN_RETRY_DELAY", "5"))
                 }
-            }
+            },
+            "dex_routers": {
+                "ethereum": [
+                    "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",  # Uniswap V2 Router
+                    "0xE592427A0AEce92De3Edee1F18E0157C05861564",  # Uniswap V3 Router
+                    "0x1111111254EEB25477B68fb85Ed929f73A960582"   # 1inch Router
+                ],
+                "bsc": [
+                    "0x10ED43C718714eb63d5aA57B78B54704E256024E",  # PancakeSwap Router
+                    "0x13f4EA83D0bd40E75C8222255bc855a974568Dd4"   # PancakeSwap V3 Router
+                ],
+                "base": [
+                    "0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6",  # BaseSwap Router
+                    "0x327Df1E6de05895d2ab08513aaDD9313Fe505D86"   # BaseSwap V3 Router
+                ]
+            },
+            "erc20_abi": [
+                {"constant": True, "inputs": [], "name": "decimals", "outputs": [{"name": "", "type": "uint8"}], "type": "function"},
+                {"constant": True, "inputs": [], "name": "name", "outputs": [{"name": "", "type": "string"}], "type": "function"},
+                {"constant": True, "inputs": [], "name": "symbol", "outputs": [{"name": "", "type": "string"}], "type": "function"}
+            ]
         }
 
         # Load from main config file
@@ -247,6 +272,14 @@ class Config(BaseSettings):
     def get_coingecko_api_key(self) -> str:
         """Get CoinGecko API URL"""
         return self.api["coingecko"]["api_key"]
+
+    def get_airdrop_alert_url(self) -> str:
+        """Get Airdrop API URL"""
+        return self.api.get("airdrop", {}).get("url", "http://localhost:5000")
+    
+    def get_airdrop_alert_timeout(self) -> int:
+        """Get Airdrop Alert timeout"""
+        return self.api.get("airdrop", {}).get("timeout", 5)
 
     def get_alert_url(self) -> str:
         """Get Alert API URL"""

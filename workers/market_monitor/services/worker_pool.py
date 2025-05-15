@@ -1,5 +1,3 @@
-# services/worker_pool.py
-
 import asyncio
 import json
 import logging
@@ -22,224 +20,177 @@ class WorkerPool:
         self.config = get_config()
         self.worker_status = {}
         self.last_health_check = None
-        
+        self._health_check_task = None
+
     async def start(self):
-        """Start worker pool"""
+        """Start worker pool and health check."""
         try:
-            # Initialize Redis client
             self.redis_client = await RedisClient.get_instance()
             logger.info("[WorkerPool] Redis client initialized")
-            
-            # Initialize default workers
-            logger.info("[WorkerPool] Initializing default workers...")
-            await self.add_worker("token", TokenWatcher)
-            await self.add_worker("wallet", WalletWatcher)
-            await self.add_worker("airdrop", AirdropWatcher)
-            
-            # Verify workers are running
+
+            # Khởi tạo workers song song
+            workers_to_start = [
+                ("token", TokenWatcher),
+                ("wallet", WalletWatcher),
+                ("airdrop", AirdropWatcher),
+            ]
+            await asyncio.gather(*[self.add_worker(wid, wclass) for wid, wclass in workers_to_start])
+
+            # Log status workers
             for worker_id, worker in self.workers.items():
-                if not worker.is_running:
-                    logger.error(f"[WorkerPool] Worker {worker_id} failed to start")
-                else:
-                    logger.info(f"[WorkerPool] Worker {worker_id} is running with {len(worker.watching_targets)} targets")
-            
-            # Start health check loop
+                logger.info(
+                    f"[WorkerPool] Worker {worker_id} {'is running' if worker.is_running else 'failed'} "
+                    f"with {len(getattr(worker, 'watching_targets', []))} targets"
+                )
+
+            # Health check loop
             self._health_check_task = asyncio.create_task(self._health_check_loop())
             logger.info("[WorkerPool] Health check loop started")
-            
-            logger.info("[WorkerPool] Worker pool started with default workers")
-            
+
         except Exception as e:
-            logger.error(f"[WorkerPool] Error starting worker pool: {e}")
+            logger.error(f"[WorkerPool] Error starting worker pool: {e}", exc_info=True)
             await self.stop()
             raise
-            
+
     async def stop(self):
-        """Stop worker pool"""
+        """Stop all workers and clean up."""
+        logger.info("[WorkerPool] Stopping worker pool...")
         try:
-            logger.info("[WorkerPool] Stopping worker pool...")
-            
-            # Stop health check loop
-            if hasattr(self, '_health_check_task'):
+            if self._health_check_task:
                 self._health_check_task.cancel()
                 try:
                     await self._health_check_task
                 except asyncio.CancelledError:
                     pass
-            
-            # Stop all workers
-            for worker_id, worker in self.workers.items():
-                try:
-                    logger.info(f"[WorkerPool] Stopping worker {worker_id}...")
-                    await worker.stop()
-                except Exception as e:
-                    logger.error(f"[WorkerPool] Error stopping worker {worker_id}: {e}")
+
+            await asyncio.gather(*(worker.stop() for worker in self.workers.values()), return_exceptions=True)
             self.workers.clear()
-            
-            # Close Redis connection
+
             if self.redis_client:
                 await RedisClient.close()
-                
             logger.info("[WorkerPool] Worker pool stopped")
-            
+
         except Exception as e:
-            logger.error(f"[WorkerPool] Error stopping worker pool: {e}")
-            
+            logger.error(f"[WorkerPool] Error stopping worker pool: {e}", exc_info=True)
+
     async def add_worker(self, worker_id: str, worker_class: Type[BaseWatcher], **kwargs):
-        """Add a new worker to the pool"""
+        """Add a new worker to the pool."""
+        if worker_id in self.workers:
+            logger.warning(f"[WorkerPool] Worker {worker_id} already exists")
+            return
         try:
-            if worker_id in self.workers:
-                logger.warning(f"[WorkerPool] Worker {worker_id} already exists")
-                return
-                
-            # Create worker
             worker = worker_class(**kwargs)
-            
-            # Start worker in a separate task
-            start_task = asyncio.create_task(worker.start())
-            self.workers[worker_id] = worker
-            
-            # Wait a bit to ensure worker is initialized
-            await asyncio.sleep(1)
-            
+            await worker.start()
             if not worker.is_running:
                 logger.error(f"[WorkerPool] Worker {worker_id} failed to start")
-                await self.remove_worker(worker_id)
                 return
-                
+            self.workers[worker_id] = worker
             logger.info(f"[WorkerPool] Added worker {worker_id}")
-            
         except Exception as e:
-            logger.error(f"[WorkerPool] Error adding worker {worker_id}: {e}")
+            logger.error(f"[WorkerPool] Error adding worker {worker_id}: {e}", exc_info=True)
             raise
-            
+
     async def remove_worker(self, worker_id: str):
-        """Remove a worker from the pool"""
+        """Remove a worker from the pool."""
+        worker = self.workers.pop(worker_id, None)
+        if not worker:
+            logger.warning(f"[WorkerPool] Worker {worker_id} not found")
+            return
         try:
-            if worker_id not in self.workers:
-                logger.warning(f"Worker {worker_id} not found")
-                return
-                
-            # Stop and remove worker
-            await self.workers[worker_id].stop()
-            del self.workers[worker_id]
-            
-            logger.info(f"Removed worker {worker_id}")
-            
+            await worker.stop()
+            logger.info(f"[WorkerPool] Removed worker {worker_id}")
         except Exception as e:
-            logger.error(f"Error removing worker {worker_id}: {e}")
-            raise
-            
+            logger.error(f"[WorkerPool] Error removing worker {worker_id}: {e}", exc_info=True)
+
     async def get_worker(self, worker_id: str) -> Optional[BaseWatcher]:
-        """Get a worker by ID"""
+        """Get a worker by ID."""
         return self.workers.get(worker_id)
-        
+
     async def get_workers(self) -> List[BaseWatcher]:
-        """Get all workers"""
+        """Get all workers."""
         return list(self.workers.values())
 
     async def _health_check_loop(self):
-        """Periodic health check of workers"""
+        """Periodic health check of workers."""
         while True:
             try:
-                current_time = datetime.utcnow()
-                
-                # Update worker status and check health
-                for worker_type, watcher in self.workers.items():
+                now = datetime.utcnow()
+                for wid, watcher in self.workers.items():
                     try:
-                        # Check if worker is running
                         if not watcher.is_running:
-                            logger.warning(f"[WorkerPool] Worker {worker_type} is not running, attempting restart...")
-                            await self.remove_worker(worker_type)
-                            await self.add_worker(worker_type, type(watcher))
-                            continue
-                            
-                        # Update status
-                        self.worker_status[worker_type] = {
+                            logger.warning(f"[WorkerPool] Worker {wid} is not running, restarting...")
+                            await self.remove_worker(wid)
+                            await self.add_worker(wid, type(watcher))
+                        self.worker_status[wid] = {
                             "active": watcher.is_running,
-                            "targets": len(watcher.watching_targets),
-                            "last_check": current_time.isoformat()
+                            "targets": len(getattr(watcher, 'watching_targets', [])),
+                            "last_check": now.isoformat(),
                         }
                     except Exception as e:
-                        logger.error(f"[WorkerPool] Error checking worker {worker_type}: {e}")
-                
+                        logger.error(f"[WorkerPool] Error checking worker {wid}: {e}", exc_info=True)
+
                 # Publish status to Redis
                 try:
-                    await self.redis_client.set(
-                        "worker:status",
-                        json.dumps(self.worker_status),
-                        60  # Expire after 1 minute
-                    )
+                    await self.redis_client.set("worker:status", json.dumps(self.worker_status), 60)
                 except Exception as e:
-                    logger.error(f"[WorkerPool] Error publishing worker status: {e}")
-                
-                self.last_health_check = current_time
-                await asyncio.sleep(30)  # Check every 30 seconds
-                
+                    logger.error(f"[WorkerPool] Error publishing worker status: {e}", exc_info=True)
+
+                self.last_health_check = now
+                await asyncio.sleep(30)
             except Exception as e:
-                logger.error(f"[WorkerPool] Error in health check loop: {e}")
-                await asyncio.sleep(5)  # Wait before retrying
+                logger.error(f"[WorkerPool] Error in health check loop: {e}", exc_info=True)
+                await asyncio.sleep(5)
 
     async def register_rule(self, rule: Dict):
-        """Register a new rule with appropriate watcher"""
+        """Register a new rule with appropriate watcher."""
         try:
             watch_type = rule.get("watch_type", "token")
-            if watch_type not in self.workers:
-                logger.error(f"Unknown watch type: {watch_type}")
+            watcher = self.workers.get(watch_type)
+            if not watcher:
+                logger.error(f"[WorkerPool] Unknown watch type: {watch_type}")
                 return False
-            
-            watcher = self.workers[watch_type]
             return await watcher.register_rule(rule)
-            
         except Exception as e:
-            logger.error(f"Error registering rule: {e}")
+            logger.error(f"[WorkerPool] Error registering rule: {e}", exc_info=True)
             return False
 
     async def unregister_rule(self, rule_id: str, watch_type: str = "token"):
-        """Unregister a rule from watcher"""
+        """Unregister a rule from watcher."""
         try:
-            if watch_type not in self.workers:
-                logger.error(f"Unknown watch type: {watch_type}")
+            watcher = self.workers.get(watch_type)
+            if not watcher:
+                logger.error(f"[WorkerPool] Unknown watch type: {watch_type}")
                 return False
-            
-            watcher = self.workers[watch_type]
             return await watcher.unregister_rule(rule_id)
-            
         except Exception as e:
-            logger.error(f"Error unregistering rule: {e}")
+            logger.error(f"[WorkerPool] Error unregistering rule: {e}", exc_info=True)
             return False
 
     async def get_worker_status(self) -> Dict:
-        """Get current status of all workers"""
+        """Get current status of all workers."""
         return {
             "workers": self.worker_status,
-            "last_health_check": self.last_health_check.isoformat()
+            "last_health_check": self.last_health_check.isoformat() if self.last_health_check else None,
         }
 
     async def scale_workers(self, watch_type: str, target_count: int):
-        """Scale number of workers for a specific type"""
+        """Scale number of workers for a specific type (if supported)."""
         try:
-            if watch_type not in self.workers:
-                logger.error(f"Unknown watch type: {watch_type}")
+            watcher = self.workers.get(watch_type)
+            if not watcher or not hasattr(watcher, "workers"):
+                logger.error(f"[WorkerPool] Unknown or non-scalable watch type: {watch_type}")
                 return False
-            
-            current_count = len(self.workers[watch_type].workers)
+
+            current_count = len(watcher.workers)
             if target_count == current_count:
                 return True
-            
-            watcher = self.workers[watch_type]
+
             if target_count > current_count:
-                # Scale up
-                for _ in range(target_count - current_count):
-                    await watcher.add_worker()
+                await asyncio.gather(*(watcher.add_worker() for _ in range(target_count - current_count)))
             else:
-                # Scale down
-                for _ in range(current_count - target_count):
-                    await watcher.remove_worker()
-            
-            logger.info(f"Scaled {watch_type} workers from {current_count} to {target_count}")
+                await asyncio.gather(*(watcher.remove_worker() for _ in range(current_count - target_count)))
+            logger.info(f"[WorkerPool] Scaled {watch_type} workers from {current_count} to {target_count}")
             return True
-            
         except Exception as e:
-            logger.error(f"Error scaling workers: {e}")
-            return False 
+            logger.error(f"[WorkerPool] Error scaling workers: {e}", exc_info=True)
+            return False

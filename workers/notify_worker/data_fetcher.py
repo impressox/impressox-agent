@@ -19,7 +19,7 @@ SOCIAL_URL = os.getenv('SOCIAL_URL', 'http://45.32.111.45:5000/summary_social')
 logger.info(f"Alert URL: {ALERT_URL}")
 logger.info(f"Airdrop URL: {AIRDROP_URL}")
 logger.info(f"Social URL: {SOCIAL_URL}")
-schedule_interval = int(os.getenv('SCHEDULE_INTERVAL', "1"))
+schedule_interval = int(os.getenv('SCHEDULE_DATA_INTERVAL', "4"))
 
 async def fetch_alerts():
     try:
