@@ -1,0 +1,34 @@
+# Core
+python-dotenv>=1.0.0
+
+# API Clients
+aiohttp==3.9.3
+pydantic>=2.7.4
+pydantic-settings>=2.4.0
+pydantic-core>=2.18.2
+PyYAML==6.0.1
+
+# Utils
+pytz>=2023.3
+schedule>=1.2.0
+websockets>=11.0.3
+
+# Logging
+python-json-logger>=2.0.0
+
+# Testing
+pytest>=6.2.5
+pytest-asyncio>=0.16.0
+pytest-cov>=2.12.0
+
+# Type checking
+mypy>=0.910
+types-PyYAML>=5.4.0
+
+solana>=0.36.6
+solders>=0.26.0
+base58>=2.1.1
+eth_utils>=5.3.0
+
+#web3
+web3>=7.11.0
