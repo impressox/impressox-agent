@@ -1,277 +1,192 @@
-import asyncio
 import json
+import asyncio
+from typing import List, Dict, Optional, Any
 import logging
-from typing import Dict, List, Any, Set
-import os
+from functools import partial
+from bson import ObjectId
+from datetime import datetime
 
-from workers.market_monitor.services.base import BaseWatcher
-from workers.market_monitor.services.wallet_tracker import WalletTrackerFactory, Chain, WalletType, ActivityType
-from workers.market_monitor.shared.models import Rule
-from workers.market_monitor.utils.config import get_config
-from workers.market_monitor.utils.mongo import MongoJSONEncoder
+from app.utils.call_api import call_api
+from app.cache.cache_redis import get_redis_client
+from app.cache.rule_storage import RuleStorage
+from app.constants import NodeName
+from app.configs import app_configs
+from app.core.tool_registry import register_tool
+from langchain_core.tools import tool
+from langchain_core.runnables import RunnableConfig
 
 logger = logging.getLogger(__name__)
 
-class WalletWatcher(BaseWatcher):
-    def __init__(self):
-        super().__init__()
-        self.config = get_config()
-        self.watch_type = "wallet"
-        self.watch_interval = int(os.getenv("WALLET_WATCH_INTERVAL", 5))
-        self.evm_chains = [Chain.ETHEREUM, Chain.BSC, Chain.BASE]
-        self.solana_chain = Chain.SOLANA
-        self.wallet_types: Dict[str, WalletType] = {}
-        self.balance_cache: Dict[str, float] = {}
-        self.tx_cache: Dict[str, bool] = {}
 
-    async def watch_targets(self):
-        """Watch wallet activities across multiple chains and wallets in parallel."""
-        try:
-            watching_targets = set(self.watching_targets)
-            logger.info(f"[WalletWatcher] Checking activities for wallets: {list(watching_targets)}")
+class MongoJSONEncoder(json.JSONEncoder):
+    """Custom JSON encoder for MongoDB objects"""
 
-            # 1. Song song lấy rules của từng ví
-            rules_per_wallet = await asyncio.gather(
-                *(self._get_wallet_rules(wallet) for wallet in watching_targets),
-                return_exceptions=True
-            )
-            target_data = {}
-            for wallet, rules in zip(watching_targets, rules_per_wallet):
-                if isinstance(rules, Exception):
-                    logger.error(f"[WalletWatcher] Error getting rules for wallet {wallet}: {rules}", exc_info=True)
+    def default(self, obj):
+        if isinstance(obj, ObjectId):
+            return str(obj)
+        return super().default(obj)
+
+
+@register_tool(NodeName.GENERAL_NODE, "unwatch_wallet")
+@tool
+async def unwatch_wallet(
+    wallets: Optional[List[str]] = None, runable_config: RunnableConfig = None
+) -> Dict[str, Any]:
+    """
+    Tool để hủy theo dõi hoạt động của một hoặc nhiều ví đang được theo dõi.
+    Có thể hủy theo dõi một ví cụ thể, một số ví, hoặc tất cả các ví đang theo dõi.
+
+    Args:
+        wallets: Danh sách các địa chỉ ví muốn hủy theo dõi.
+               Nếu không truyền sẽ hủy theo dõi tất cả các ví.
+    Returns:
+        Dict với trạng thái và thông báo kết quả hủy theo dõi.
+    """
+    try:
+        return await _unwatch_wallet_async(wallets, runable_config)
+    except Exception as e:
+        logger.error(f"[UnwatchWallet] Error: {e}", exc_info=True)
+        return {"success": False, "message": f"Lỗi khi xử lý yêu cầu: {str(e)}"}
+
+
+async def _unwatch_wallet_async(
+    wallets: Optional[List[str]] = None, runable_config: RunnableConfig = None
+) -> Dict[str, Any]:
+    """
+    Async implementation of unwatch_wallet tool
+    """
+    # Get context values
+    user_id = runable_config["configurable"].get("user_id", "")
+    app = runable_config["configurable"].get("app", None)
+    conversation_id = runable_config["configurable"].get("conversation_id", None)
+    chat_type = runable_config["configurable"].get("chat_type", "private")
+
+    try:
+        # Get all active rules for this user
+        storage = await RuleStorage.get_instance()
+        active_rules = await storage.get_active_rules(
+            user_id, "wallet", conversation_id, chat_type
+        )
+        logger.info(
+            f"[UnwatchWallet] User {user_id} has {len(active_rules)} active rules"
+        )
+        if not active_rules:
+            return {"success": True, "message": "Bạn chưa theo dõi ví nào"}
+
+        # If wallets provided, verify they exist in user's active rules
+        if wallets:
+            # Get all unique wallets from user's active rules
+            user_wallets = set()
+            for rule in active_rules:
+                user_wallets.update(rule["target"])
+
+            # Check which wallets are not being watched
+            invalid_wallets = [w for w in wallets if w not in user_wallets]
+
+            if invalid_wallets:
+                return {
+                    "success": True,
+                    "message": f"Không tìm thấy ví nào trong danh sách theo dõi: {', '.join(invalid_wallets)}",
+                }
+
+        # Filter rules based on wallets
+        rules_to_deactivate = []
+        if wallets:
+            for rule in active_rules:
+                # Check if any of the rule's target wallets match the requested wallets
+                if any(w in wallets for w in rule["target"]):
+                    rules_to_deactivate.append(rule)
+        else:
+            # If no wallets specified, deactivate all wallet rules
+            rules_to_deactivate = active_rules
+
+        if not rules_to_deactivate:
+            return {
+                "success": True,
+                "message": f"Không tìm thấy ví nào trong danh sách theo dõi: {', '.join(wallets) if wallets else 'wallet'}",
+            }
+
+        # Get Redis client
+        redis = get_redis_client()
+
+        # Deactivate rules
+        deactivated_wallets = set()
+        for rule in rules_to_deactivate:
+            try:
+                # Verify rule belongs to user
+                if rule["user_id"] != user_id:
+                    logger.warning(
+                        f"[UnwatchWallet] Skipping rule {rule['rule_id']} - belongs to different user"
+                    )
                     continue
-                for rule in rules:
-                    if rule.target_data:
-                        for target_wallet, wallet_info in rule.target_data.items():
-                            if target_wallet not in target_data:
-                                target_data[target_wallet] = wallet_info
+                # Get wallets to remove from this rule
+                wallets_to_remove = (
+                    [w for w in rule["target"] if w in wallets]
+                    if wallets
+                    else rule["target"]
+                )
+                remaining_wallets = (
+                    [w for w in rule["target"] if w not in wallets] if wallets else []
+                )
 
-            # 2. Song song xác định loại ví
-            categorize_results = await asyncio.gather(
-                *(self._get_wallet_type(wallet) for wallet in watching_targets),
-                return_exceptions=True
-            )
-            evm_wallets, solana_wallets = set(), set()
-            for wallet, (wallet_type, is_valid) in zip(watching_targets, categorize_results):
-                if isinstance(wallet_type, Exception) or not is_valid:
-                    logger.warning(f"[WalletWatcher] Invalid wallet address: {wallet}")
-                    continue
-                self.wallet_types[wallet] = wallet_type
-                if wallet_type == WalletType.EVM:
-                    evm_wallets.add(wallet)
-                elif wallet_type == WalletType.SOLANA:
-                    solana_wallets.add(wallet)
+                if remaining_wallets:
+                    # Update rule with remaining wallets
+                    update_data = {
+                        "target": remaining_wallets,
+                        "updated_at": datetime.utcnow(),
+                        "metadata": {**rule.get("metadata", {})},
+                    }
+                    if await storage.update_rule(rule["rule_id"], update_data):
+                        # Publish deactivation event for specific wallets
+                        redis.publish(
+                            "wallet_watch:deactivate_rule",
+                            json.dumps(
+                                {
+                                    "rule_id": rule["rule_id"],
+                                    "user_id": user_id,
+                                    "watch_type": "wallet",
+                                    "target": wallets_to_remove,
+                                }
+                            ),
+                        )
+                        # Remove wallets from Redis
+                        for wallet in wallets_to_remove:
+                            redis.hdel(f"watch:active:wallet:{wallet}", rule["rule_id"])
+                            deactivated_wallets.add(wallet)
+                else:
+                    # No wallets remaining, deactivate entire rule
+                    if await storage.deactivate_rule(rule["rule_id"]):
+                        # Publish deactivation event for all wallets
+                        redis.publish(
+                            "wallet_watch:deactivate_rule",
+                            json.dumps(
+                                {
+                                    "rule_id": rule["rule_id"],
+                                    "user_id": user_id,
+                                    "watch_type": "wallet",
+                                    "target": rule["target"],
+                                }
+                            ),
+                        )
+                        # Remove all wallets from Redis
+                        for wallet in rule["target"]:
+                            redis.hdel(f"watch:active:wallet:{wallet}", rule["rule_id"])
+                            deactivated_wallets.add(wallet)
+            except Exception as e:
+                logger.error(
+                    f"[UnwatchWallet] Error deactivating rule {rule['rule_id']}: {e}"
+                )
 
-            logger.info(f"[WalletWatcher] Categorized wallets - EVM: {len(evm_wallets)}, Solana: {len(solana_wallets)}")
-
-            # 3. Song song từng cặp (chain, wallet) là một task riêng biệt
-            async def fetch_wallet(chain, wallet):
-                try:
-                    tracker = WalletTrackerFactory.create_tracker(chain)
-                    result = await tracker.get_wallet_data([wallet])
-                    if result and wallet in result:
-                        return (chain.value, wallet, result[wallet])
-                    return None
-                except Exception as e:
-                    logger.error(f"[WalletWatcher] Error get_wallet_data: chain={chain}, wallet={wallet}: {e}", exc_info=True)
-                    return None
-
-            # Tạo task cho từng cặp chain-wallet độc lập
-            tasks = []
-            for wallet in evm_wallets:
-                for chain in self.evm_chains:
-                    tasks.append(fetch_wallet(chain, wallet))
-            for wallet in solana_wallets:
-                tasks.append(fetch_wallet(self.solana_chain, wallet))
-
-            all_wallet_data: Dict[str, Dict[str, Any]] = {}
-            if tasks:
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                for entry in results:
-                    if isinstance(entry, Exception) or not entry:
-                        continue
-                    chain, wallet, data = entry
-                    if chain not in all_wallet_data:
-                        all_wallet_data[chain] = {}
-                    all_wallet_data[chain][wallet] = data
-
-            if not all_wallet_data:
-                logger.warning("[WalletWatcher] No wallet data received from any chain")
-                return
-
-            logger.info(f"[WalletWatcher] Received wallet data: {json.dumps(all_wallet_data, cls=MongoJSONEncoder)}")
-
-            # 4. Tổng hợp rules đã lấy ở trên
-            all_active_rules = []
-            for rules in rules_per_wallet:
-                if isinstance(rules, Exception):
-                    continue
-                all_active_rules.extend(rules)
-
-            if all_active_rules:
-                logger.info(f"[WalletWatcher] Checking {len(all_active_rules)} rules against wallet data")
-                try:
-                    await self.check_rules(all_active_rules, all_wallet_data)
-                except Exception as e:
-                    logger.error(f"[WalletWatcher] Error checking rules: {e}", exc_info=True)
+        if deactivated_wallets:
+            msg = "Đã hủy theo dõi"
+            if wallets:
+                msg += f": {', '.join(sorted(deactivated_wallets))}"
             else:
-                logger.warning("[WalletWatcher] No active rules found for watching wallets")
+                msg += " tất cả các ví"
+            return {"success": True, "message": msg}
+        else:
+            return {"success": False, "message": "Không thể hủy theo dõi các ví"}
 
-        except Exception as e:
-            logger.error(f"[WalletWatcher] Error watching wallets: {e}", exc_info=True)
-
-    async def _get_wallet_rules(self, wallet: str) -> List[Rule]:
-        """Lấy rules cho một ví (async, bắt lỗi sâu)"""
-        rules = []
-        try:
-            rules_data = await self.redis.hgetall(f"watch:active:wallet:{wallet}")
-            for rule_json in rules_data.values():
-                try:
-                    rule = Rule.from_dict(json.loads(rule_json) if isinstance(rule_json, str) else rule_json)
-                    rules.append(rule)
-                except Exception as e:
-                    logger.error(f"[WalletWatcher] Error processing rule for wallet {wallet}: {e}", exc_info=True)
-        except Exception as e:
-            logger.error(f"[WalletWatcher] Error getting rules for wallet {wallet}: {e}", exc_info=True)
-        return rules
-
-    async def _get_wallet_type(self, wallet: str):
-        """Xác định loại ví (EVM/SOLANA), async, không vỡ luồng nếu lỗi"""
-        try:
-            wallet_type, is_valid = WalletTrackerFactory.get_wallet_type(wallet)
-            return wallet_type, is_valid
-        except Exception as e:
-            logger.error(f"[WalletWatcher] Error categorizing wallet {wallet}: {e}", exc_info=True)
-            return None, False
-
-    def evaluate_conditions(self, rule: Rule, wallet_data: Dict) -> List[Dict]:
-        matches = []
-        condition = rule.condition or {"type": "any"}
-        logger.info(f"[WalletWatcher] Evaluating conditions for rule {rule.rule_id}: {json.dumps(condition)}")
-
-        for wallet in rule.target:
-            wallet_name = rule.target_data.get(wallet, {}).get("name", wallet)
-            for chain_data in wallet_data.values():
-                if wallet not in chain_data:
-                    continue
-                data = chain_data[wallet]
-                chain = data.get("chain")
-                current_balance = data.get("balance", 0)
-                transactions = data.get("transactions", [])
-
-                cache_key = f"{chain}:{wallet}"
-                prev_balance = self.balance_cache.get(cache_key, current_balance)
-                self.balance_cache[cache_key] = current_balance
-                balance_change = current_balance - prev_balance
-
-                tx_matches = {}
-                for tx in transactions:
-                    tx_hash = tx.get("hash")
-                    if not tx_hash or f"{chain}:{tx_hash}" in self.tx_cache:
-                        continue
-                    self.tx_cache[f"{chain}:{tx_hash}"] = True
-
-                    if tx_hash not in tx_matches:
-                        tx_matches[tx_hash] = {
-                            'wallet': wallet,
-                            'wallet_name': wallet_name,
-                            'chain': chain,
-                            'hash': tx_hash,
-                            'block_number': tx.get('block_number'),
-                            'timestamp': tx.get('timestamp'),
-                            'transfers': [],
-                            'balance_change': balance_change
-                        }
-                    tx_matches[tx_hash]['transfers'].append(tx)
-
-                for tx_hash, tx_data in tx_matches.items():
-                    transfers = tx_data['transfers']
-                    balance_change = tx_data['balance_change']
-                    token_transfer = next((t for t in transfers if t['type'] == 'token_transfer'), None)
-
-                    if token_transfer:
-                        activity_type = token_transfer.get('activity_type')
-                        if balance_change < 0 and activity_type == 'token_transfer_in':
-                            matches.append({
-                                'wallet': wallet,
-                                'wallet_name': wallet_name,
-                                'chain': chain,
-                                'activity_type': 'token_trade',
-                                'token_in': 'native',
-                                'token_in_name': chain.upper(),
-                                'token_in_symbol': self.config.get_native_symbol(chain),
-                                'amount_in': abs(balance_change),
-                                'formatted_amount_in': str(abs(balance_change)),
-                                'token_out': token_transfer.get('token'),
-                                'token_out_name': token_transfer.get('token_name'),
-                                'token_out_symbol': token_transfer.get('token_symbol'),
-                                'amount_out': token_transfer.get('value'),
-                                'formatted_amount_out': token_transfer.get('formatted_amount'),
-                                'hash': tx_hash,
-                                'block_number': tx_data.get('block_number'),
-                                'timestamp': tx_data.get('timestamp')
-                            })
-                        elif balance_change > 0 and activity_type == 'token_transfer_out':
-                            matches.append({
-                                'wallet': wallet,
-                                'wallet_name': wallet_name,
-                                'chain': chain,
-                                'activity_type': 'token_trade',
-                                'token_in': token_transfer.get('token'),
-                                'token_in_name': token_transfer.get('token_name'),
-                                'token_in_symbol': token_transfer.get('token_symbol'),
-                                'amount_in': token_transfer.get('value'),
-                                'formatted_amount_in': token_transfer.get('formatted_amount'),
-                                'token_out': 'native',
-                                'token_out_name': chain.upper(),
-                                'token_out_symbol': self.config.get_native_symbol(chain),
-                                'amount_out': balance_change,
-                                'formatted_amount_out': str(balance_change),
-                                'hash': tx_hash,
-                                'block_number': tx_data.get('block_number'),
-                                'timestamp': tx_data.get('timestamp')
-                            })
-                        else:
-                            matches.append({
-                                **token_transfer,
-                                'hash': tx_hash,
-                                'wallet': wallet,
-                                'wallet_name': wallet_name,
-                                'chain': chain,
-                                'block_number': tx_data.get('block_number'),
-                                'timestamp': tx_data.get('timestamp'),
-                            })
-                    else:
-                        for t in transfers:
-                            matches.append({
-                                **t,
-                                'wallet': wallet,
-                                'wallet_name': wallet_name,
-                                'chain': chain,
-                                'hash': tx_hash,
-                                'block_number': tx_data.get('block_number'),
-                                'timestamp': tx_data.get('timestamp'),
-                            })
-
-        return matches
-
-    async def initialize_cache(self, targets: List[str]):
-        """Initialize cache for new wallets"""
-        try:
-            init_tasks = []
-            for wallet in targets:
-                wallet_type, is_valid = WalletTrackerFactory.get_wallet_type(wallet)
-                if not is_valid:
-                    logger.warning(f"[WalletWatcher] Invalid wallet address: {wallet}")
-                    continue
-                if wallet_type == WalletType.EVM:
-                    for chain in self.evm_chains:
-                        tracker = WalletTrackerFactory.create_tracker(chain)
-                        init_tasks.append(tracker.get_wallet_data([wallet]))
-                elif wallet_type == WalletType.SOLANA:
-                    tracker = WalletTrackerFactory.create_tracker(self.solana_chain)
-                    init_tasks.append(tracker.get_wallet_data([wallet]))
-            if init_tasks:
-                await asyncio.gather(*init_tasks, return_exceptions=True)
-        except Exception as e:
-            logger.error(f"[WalletWatcher] Error initializing cache: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"[UnwatchWallet] Error: {e}", exc_info=True)
+        return {"success": False, "message": f"Lỗi khi hủy theo dõi: {str(e)}"}

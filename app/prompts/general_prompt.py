@@ -89,4 +89,9 @@ When responding with analysis, explanations, or summaries:
   - _“Would you like to monitor this token for unusual activity?”_
   - _“Should I set a price alert for this trend?”_
   - _“Want me to compare this token with your current portfolio?”_
+
+### 6. **Code Generation Standard**
+- When the user requests code generation or a coding solution, always generate code in Python.
+- Ensure the generated code assigns the final result to a variable named `output` (e.g., `output = ...`) so it can be easily executed and the result extracted by the system.
+- Do not return code in any other language or format.
 """

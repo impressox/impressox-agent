@@ -1,7 +1,8 @@
-import logging
+import logging 
 from datetime import datetime
 from typing import Dict, Any, List
-from web3 import Web3
+import asyncio
+from web3 import AsyncWeb3, Web3
 from eth_utils import to_checksum_address
 
 from workers.market_monitor.services.wallet_tracker.base import Chain, ActivityType
@@ -14,7 +15,7 @@ class EVMWalletTracker:
     def __init__(self, chain: Chain, config: Any):
         self.chain = chain
         self.config = config
-        self.w3 = chain.w3
+        self.w3: AsyncWeb3 = chain.w3  # AsyncWeb3 instance
         self.block_cache: Dict[str, int] = {}
         self.tx_cache: Dict[str, bool] = {}
         self.token_cache: Dict[str, Any] = {}
@@ -40,17 +41,18 @@ class EVMWalletTracker:
 
     async def get_wallet_data(self, wallets: List[str]) -> Dict[str, Any]:
         logger.info(f"[EVMWalletTracker] Fetching {self.chain.value} data for wallets: {wallets}")
-        if not self.w3.is_connected():
+        if not await self.w3.is_connected():
             logger.error(f"[EVMWalletTracker] Failed to connect to {self.chain.value} RPC")
             return {}
 
         result: Dict[str, Any] = {}
-        current_block = self.w3.eth.block_number
+        current_block = await self.w3.eth.block_number
 
-        for wallet in wallets:
+        logger.info(f"[EVMWalletTracker] Fetching {self.chain.value} data for wallets: {wallets}, current block: {current_block}")
+        async def fetch_wallet(wallet):
             try:
                 addr = to_checksum_address(wallet)
-                balance = self.w3.eth.get_balance(addr)
+                balance = await self.w3.eth.get_balance(addr)
                 cache_key = f"{self.chain.value}:{addr}"
                 prev_balance = self.balance_cache.get(cache_key, self.w3.from_wei(balance, 'ether'))
                 current_balance = self.w3.from_wei(balance, 'ether')
@@ -58,39 +60,42 @@ class EVMWalletTracker:
                 balance_change = current_balance - prev_balance
 
                 from_block = self.block_cache.get(cache_key, current_block - 100)
-                logs: List[Any] = []
 
-                def get_logs(filter_params):
+                # SONG SONG: fetch logs theo từng topic
+                async def get_logs(topic):
+                    filter_params = {
+                        "fromBlock": hex(from_block),
+                        "toBlock": hex(current_block),
+                        "topics": [[topic]],
+                        "address": None
+                    }
                     try:
-                        resp = self.w3.provider.make_request("eth_getLogs", [filter_params])
+                        resp = await self.w3.provider.make_request("eth_getLogs", [filter_params])
                         return resp.get("result", []) if isinstance(resp, dict) else []
                     except Exception as e:
                         logger.error(f"[EVMWalletTracker] RPC error: {e}", exc_info=True)
                         return []
 
-                for topic in [self.token_transfer_topic, self.erc1155_single_topic, self.erc1155_batch_topic]:
-                    logs.extend(
-                        get_logs({
-                            "fromBlock": hex(from_block),
-                            "toBlock": hex(current_block),
-                            "topics": [[topic]],
-                            "address": None,
-                        })
-                    )
+                logs_batches = await asyncio.gather(
+                    get_logs(self.token_transfer_topic),
+                    get_logs(self.erc1155_single_topic),
+                    get_logs(self.erc1155_batch_topic)
+                )
+                logs = [log for batch in logs_batches for log in batch]
 
                 filtered = []
                 for log in logs:
                     try:
                         topics = log.get("topics", [])
                         if len(topics) >= 3:
-                            frm = "0x" + topics[1][-40:]
-                            to = "0x" + topics[2][-40:]
+                            frm = AsyncWeb3.to_checksum_address("0x" + topics[1][-40:])
+                            to = AsyncWeb3.to_checksum_address("0x" + topics[2][-40:])
                             if addr.lower() in (frm.lower(), to.lower()):
                                 filtered.append(log)
                     except Exception as e:
                         logger.warning(f"[EVMWalletTracker] Error filtering log: {e}", exc_info=True)
 
-                transactions = self._process_wallet_logs(filtered, addr, balance_change)
+                transactions = await self._process_wallet_logs(filtered, addr, balance_change)
                 result[addr] = {
                     "chain": self.chain.value,
                     "balance": current_balance,
@@ -102,8 +107,10 @@ class EVMWalletTracker:
             except Exception as e:
                 logger.error(f"[EVMWalletTracker] Error processing {wallet}: {e}", exc_info=True)
 
+        await asyncio.gather(*[fetch_wallet(wallet) for wallet in wallets])
         return result
-    def _process_wallet_logs(self, logs: List[Any], wallet: str, balance_change: float) -> List[Any]:
+
+    async def _process_wallet_logs(self, logs: List[Any], wallet: str, balance_change: float) -> List[Any]:
         transactions = []
         tx_group: Dict[str, List[Any]] = {}
 
@@ -121,32 +128,45 @@ class EVMWalletTracker:
 
             token_in = None
             token_out = None
+            erc721_transfers = []
+            erc1155_transfers = []
+            token_transfer_txs = []
 
             for log in logs:
-                if log["topics"][0] == self.token_transfer_topic:
-                    frm = "0x" + log["topics"][1][-40:]
-                    to = "0x" + log["topics"][2][-40:]
-                    data = log["data"] if log["data"].startswith("0x") else "0x" + log["data"]
-                    val = int(data, 16)
-                    meta = self._get_token_metadata(log["address"])
-                    fmt = self._format_token_amount(val, meta["decimals"])
-                    if frm.lower() == wallet.lower():
-                        token_out = {
-                            "address": log["address"],
-                            "name": meta["name"],
-                            "symbol": meta["symbol"],
-                            "amount": val,
-                            "formatted_amount": fmt
-                        }
-                    elif to.lower() == wallet.lower():
-                        token_in = {
-                            "address": log["address"],
-                            "name": meta["name"],
-                            "symbol": meta["symbol"],
-                            "amount": val,
-                            "formatted_amount": fmt
-                        }
+                topics = log.get("topics", [])
+                if len(topics) == 0:
+                    continue
+                if topics[0] == self.token_transfer_topic:
+                    tx_obj = await self._process_token_transfer(log, wallet)
+                    if not tx_obj:
+                        continue
+                    if tx_obj["type"] == "nft_transfer":
+                        erc721_transfers.append(tx_obj)
+                    elif tx_obj["type"] == "token_transfer":
+                        token_transfer_txs.append(tx_obj)
+                        # Xác định token_in/token_out như cũ để phục vụ logic trade
+                        if tx_obj["from"].lower() == wallet.lower():
+                            token_out = {
+                                "address": tx_obj["token"],
+                                "name": tx_obj.get("token_name"),
+                                "symbol": tx_obj.get("token_symbol"),
+                                "amount": tx_obj.get("value"),
+                                "formatted_amount": tx_obj.get("formatted_amount"),
+                            }
+                        elif tx_obj["to"].lower() == wallet.lower():
+                            token_in = {
+                                "address": tx_obj["token"],
+                                "name": tx_obj.get("token_name"),
+                                "symbol": tx_obj.get("token_symbol"),
+                                "amount": tx_obj.get("value"),
+                                "formatted_amount": tx_obj.get("formatted_amount"),
+                            }
+                elif topics[0] in [self.erc1155_single_topic, self.erc1155_batch_topic]:
+                    tx = await self._process_erc1155_transfer(log, wallet)
+                    if tx:
+                        erc1155_transfers.append(tx)
 
+            # === Token trade logic cũ ===
             if token_in and balance_change < 0:
                 # Native sent, token received = Buy
                 transactions.append({
@@ -190,56 +210,104 @@ class EVMWalletTracker:
                     "block_number": int(logs[0]["blockNumber"], 16)
                 })
             else:
-                # Not a trade, process as normal transfers
-                for log in logs:
-                    if log["topics"][0] == self.token_transfer_topic:
-                        tx = self._process_token_transfer(log, wallet)
-                        if tx:
-                            transactions.append(tx)
-                    elif log["topics"][0] in [self.erc1155_single_topic, self.erc1155_batch_topic]:
-                        tx = self._process_erc1155_transfer(log, wallet)
-                        if tx:
-                            transactions.append(tx)
+                # Nếu không phải trade thì lưu các token_transfer lẻ
+                for tx in token_transfer_txs:
+                    transactions.append(tx)
+
+            # === Bổ sung: log các NFT transfer (ERC721/1155) ===
+            for tx in erc721_transfers + erc1155_transfers:
+                transactions.append(tx)
+
+            # === Bổ sung: detect NFT trade nếu cùng transaction có cả NFT transfer và token_in/token_out chiều ngược lại ===
+            for nft in erc721_transfers + erc1155_transfers:
+                # Nếu có token_in hoặc token_out đối ứng trong cùng tx, log là nft_trade
+                price_token = None
+                is_buyer = nft["to"].lower() == wallet.lower()
+                if token_out and is_buyer:
+                    price_token = token_out
+                elif token_in and not is_buyer:
+                    price_token = token_in
+                if price_token:
+                    transactions.append({
+                        "type": "nft_trade",
+                        "activity_type": "nft_trade",
+                        "hash": txh,
+                        "wallet": wallet,
+                        "wallet_name": wallet,
+                        "chain": self.chain.value,
+                        "collection": nft["collection"],
+                        "token_id": nft.get("token_id"),
+                        "amount": nft.get("amount", 1),
+                        "direction": "buy" if is_buyer else "sell",
+                        "counterparty": nft["from"] if is_buyer else nft["to"],
+                        "price_token": price_token["address"],
+                        "price_token_symbol": price_token.get("symbol"),
+                        "price_token_amount": price_token["amount"],
+                        "formatted_price": price_token["formatted_amount"],
+                        "block_number": nft["block_number"]
+                    })
 
         return transactions
-
-    def _process_token_transfer(self, log: Any, wallet: str) -> Any:
+     
+    async def _process_token_transfer(self, log: Any, wallet: str) -> Any:
         try:
             frm = "0x" + log["topics"][1][-40:]
             to = "0x" + log["topics"][2][-40:]
             if wallet.lower() not in (frm.lower(), to.lower()):
                 return None
             val = int(log["data"], 16)
-            meta = self._get_token_metadata(log["address"])
+            meta = await self._get_token_metadata(log["address"])
             fmt = self._format_token_amount(val, meta["decimals"])
-            activity = (
-                "token_transfer_in"
-                if to.lower() == wallet.lower()
-                else "token_transfer_out"
-            )
-            return {
-                "type": "token_transfer",
-                "activity_type": activity,
-                "hash": log["transactionHash"],
-                "wallet": wallet,
-                "wallet_name": wallet,
-                "chain": self.chain.value,
-                "from": frm,
-                "to": to,
-                "token": log["address"],
-                "token_name": meta["name"],
-                "token_symbol": meta["symbol"],
-                "value": val,
-                "formatted_amount": fmt,
-                "block_number": int(log["blockNumber"], 16),
-                "direction": "in" if to.lower() == wallet.lower() else "out",
-                "is_self_transfer": frm.lower() == to.lower() == wallet.lower()
-            }
+            # Giả sử decimals==0 và value==1 là ERC721 (NFT)
+            if meta["decimals"] == 0 and val == 1:
+                activity = (
+                    "nft_transfer_in" if to.lower() == wallet.lower() else "nft_transfer_out"
+                )
+                return {
+                    "type": "nft_transfer",
+                    "activity_type": activity,
+                    "hash": log["transactionHash"],
+                    "wallet": wallet,
+                    "wallet_name": wallet,
+                    "chain": self.chain.value,
+                    "from": frm,
+                    "to": to,
+                    "token_id": int(log["topics"][3], 16) if len(log["topics"]) > 3 else None,
+                    "collection": log["address"],
+                    "native_symbol": self.config.get_native_symbol(self.chain.value),
+                    "block_number": int(log["blockNumber"], 16),
+                    "direction": "in" if to.lower() == wallet.lower() else "out",
+                }
+            else:
+                activity = (
+                    "token_transfer_in"
+                    if to.lower() == wallet.lower()
+                    else "token_transfer_out"
+                )
+                return {
+                    "type": "token_transfer",
+                    "activity_type": activity,
+                    "hash": log["transactionHash"],
+                    "wallet": wallet,
+                    "wallet_name": wallet,
+                    "chain": self.chain.value,
+                    "from": frm,
+                    "to": to,
+                    "token": log["address"],
+                    "native_symbol": self.config.get_native_symbol(self.chain.value),
+                    "token_name": meta["name"],
+                    "token_symbol": meta["symbol"],
+                    "value": val,
+                    "formatted_amount": fmt,
+                    "block_number": int(log["blockNumber"], 16),
+                    "direction": "in" if to.lower() == wallet.lower() else "out",
+                    "is_self_transfer": frm.lower() == to.lower() == wallet.lower()
+                }
         except Exception as e:
             logger.error(f"Error token transfer: {e}", exc_info=True)
             return None
 
-    def _process_erc1155_transfer(self, log: Any, wallet: str) -> Any:
+    async def _process_erc1155_transfer(self, log: Any, wallet: str) -> Any:
         try:
             tpcs = log["topics"]
             frm = "0x" + tpcs[2][-40:]
@@ -267,6 +335,7 @@ class EVMWalletTracker:
                 "wallet_name": wallet,
                 "chain": self.chain.value,
                 "collection": log["address"],
+                "native_symbol": self.config.get_native_symbol(self.chain.value),
                 "from": frm,
                 "to": to,
                 "token_id": idv,
@@ -277,22 +346,22 @@ class EVMWalletTracker:
             logger.error(f"Error ERC1155: {e}", exc_info=True)
             return None
 
-    def _get_token_metadata(self, addr: str) -> Dict[str, Any]:
+    async def _get_token_metadata(self, addr: str) -> Dict[str, Any]:
         key = f"{self.chain.value}:{addr}"
         if key in self.token_cache:
             return self.token_cache[key]
-        checksum = Web3.to_checksum_address(addr)
+        checksum = AsyncWeb3.to_checksum_address(addr)
         contract = self.w3.eth.contract(address=checksum, abi=self.erc20_abi)
         try:
-            name = contract.functions.name().call()
+            name = await contract.functions.name().call()
         except:
             name = f"Token-{checksum[:8]}"
         try:
-            sym = contract.functions.symbol().call()
+            sym = await contract.functions.symbol().call()
         except:
             sym = f"TKN-{checksum[:4]}"
         try:
-            dec = contract.functions.decimals().call()
+            dec = await contract.functions.decimals().call()
         except:
             dec = 18
         meta = {"name": name, "symbol": sym, "decimals": dec}

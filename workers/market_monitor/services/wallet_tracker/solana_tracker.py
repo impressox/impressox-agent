@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 from typing import Dict, List
 from solders.pubkey import Pubkey
 from solders.rpc.responses import GetTransactionResp
-from base58 import b58decode
 import base64
 import re
 
@@ -14,7 +13,7 @@ from .base import Chain
 
 logger = logging.getLogger(__name__)
 JUPITER_TOKENLIST_URL = "https://token.jup.ag/all"
-CACHE_FILE = "jupiter_tokenlist_cache.json"
+CACHE_FILE = "monitor_cache/jupiter_tokenlist_cache.json"
 CACHE_DURATION = timedelta(days=1)
 SOLANA_DEX_PROGRAMS = {
     # Jupiter Aggregator
@@ -279,10 +278,7 @@ class SolanaWalletTracker:
             if from_token and to_token and meta.err is None:
                 swap_result["status"] = "success"
             
-            account_keys = [
-                str(key)
-                for key in tx_data.value.transaction.transaction.message.account_keys
-            ]
+            account_keys = self._extract_account_keys(tx_data)
             swap_result["dex"] = get_dex_name(logs, account_keys)
 
             return swap_result
@@ -392,6 +388,7 @@ class SolanaWalletTracker:
 
                         # NFT transfer detection
                         for balance in meta.post_token_balances or []:
+                            # Xác định đây là NFT (decimals==0, amount==1)
                             if balance.ui_token_amount.decimals == 0 and int(balance.ui_token_amount.amount) == 1:
                                 mint = str(balance.mint)
                                 direction = 'in' if str(balance.owner) == wallet else 'out'
@@ -399,14 +396,15 @@ class SolanaWalletTracker:
                                 nft_symbol = mint_meta['symbol']
                                 nft_name = mint_meta['name']
                                 transactions.append({
-                                    'type': f'nft_transfer_{direction}',
-                                    'activity_type': 'nft_transfer',
+                                    'activity_type': f'nft_transfer_{direction}',
+                                    'type': 'nft_transfer',
                                     'hash': tx_hash,
                                     'wallet': wallet,
                                     'wallet_name': wallet,
                                     'mint': mint,
                                     'nft_symbol': nft_symbol,
                                     'nft_name': nft_name,
+                                    'native_symbol': 'SOL',
                                     'amount': 1,
                                     'block_number': tx_data.value.slot,
                                     'timestamp': datetime.fromtimestamp(tx_data.value.block_time).isoformat() if tx_data.value.block_time else None,
@@ -415,31 +413,86 @@ class SolanaWalletTracker:
 
                         # NFT trade (marketplace)
                         if any("Instruction: Sell" in msg or "Instruction: Buy" in msg for msg in logs):
+                            account_keys = self._extract_account_keys(tx_data)
+                            pre_balances = meta.pre_balances or []
+                            post_balances = meta.post_balances or []
+                            sol_paid = None
+                            counterparty = None
+                            direction = None
+
+                            if wallet in account_keys:
+                                idx = account_keys.index(wallet)
+                                if idx < len(pre_balances) and idx < len(post_balances):
+                                    sol_delta = post_balances[idx] - pre_balances[idx] + (meta.fee or 0)
+                                    if sol_delta < -0.000001:
+                                        sol_paid = abs(sol_delta)
+                                        direction = 'buy'
+                                        # Counterparty là ví nhận NFT, bạn có thể extract từ log hoặc balance change
+                                        # Nếu có trường owner cũ, bạn lấy từ pre/post token_balances, ví dụ:
+                                        for balance in meta.pre_token_balances or []:
+                                            if int(balance.ui_token_amount.amount) == 1 and str(balance.owner) != wallet:
+                                                counterparty = str(balance.owner)
+                                                break
+                                    elif sol_delta > 0.000001:
+                                        sol_paid = abs(sol_delta)
+                                        direction = 'sell'
+                                        for balance in meta.post_token_balances or []:
+                                            if int(balance.ui_token_amount.amount) == 1 and str(balance.owner) != wallet:
+                                                counterparty = str(balance.owner)
+                                                break
+
+                            # Lấy NFT mint (collection) từ balance changes
+                            nft_mint = None
+                            for balance in meta.post_token_balances or []:
+                                if int(balance.ui_token_amount.amount) == 1 and str(balance.owner) == wallet:
+                                    nft_mint = str(balance.mint)
+                                    break
+
                             transactions.append({
                                 'type': 'nft_trade',
                                 'activity_type': 'nft_trade',
                                 'hash': tx_hash,
                                 'wallet': wallet,
                                 'wallet_name': wallet,
+                                'chain': 'solana',
+                                'collection': nft_mint,
+                                'token_id': nft_mint,  # Solana không có token_id, có thể để chính là mint
+                                'amount': 1,
+                                'direction': direction or 'trade',
+                                'counterparty': counterparty,
+                                'price_token': "So11111111111111111111111111111111111111112",  # native SOL
+                                'price_token_symbol': 'SOL',
+                                'price_token_amount': sol_paid or 0,
+                                'formatted_price': f"{(sol_paid or 0) / 1e9:.4f}",
                                 'block_number': tx_data.value.slot,
                                 'timestamp': datetime.fromtimestamp(tx_data.value.block_time).isoformat() if tx_data.value.block_time else None,
                                 'fee': meta.fee / 1e9 if meta.fee else 0,
-                                'logs': logs
                             })
 
-                        # Native SOL transfer
-                        direction = 'out' if str(tx_data.value.transaction.message.account_keys[0]) == wallet else 'in'
-                        transactions.append({
-                            'type': f'native_transfer_{direction}',
-                            'activity_type': 'native_transfer',
-                            'hash': tx_hash,
-                            'wallet': wallet,
-                            'wallet_name': wallet,
-                            'amount': meta.fee / 1e9 if meta.fee else 0,
-                            'block_number': tx_data.value.slot,
-                            'timestamp': datetime.fromtimestamp(tx_data.value.block_time).isoformat() if tx_data.value.block_time else None,
-                            'fee': meta.fee / 1e9 if meta.fee else 0
-                        })
+                        # Native SOL transfer detection - xác định real amount
+                        account_keys = self._extract_account_keys(tx_data)
+                        pre_balances = meta.pre_balances or []
+                        post_balances = meta.post_balances or []
+
+                        if wallet in account_keys:
+                            idx = account_keys.index(wallet)
+                            if idx < len(pre_balances) and idx < len(post_balances):
+                                sol_delta = post_balances[idx] - pre_balances[idx] + (meta.fee or 0)
+                                # Chỉ log nếu khác biệt lớn hơn 0.000001 SOL (đề phòng lỗi làm tròn)
+                                if abs(sol_delta) > 0.000001:
+                                    direction = 'in' if sol_delta > 0 else 'out'
+                                    transactions.append({
+                                        'activity_type': f'native_transfer_{direction}',
+                                        'type': 'native_transfer',
+                                        'hash': tx_hash,
+                                        'wallet': wallet,
+                                        'wallet_name': wallet,
+                                        'native_symbol': 'SOL',
+                                        'amount': abs(sol_delta) / 1e9,
+                                        'block_number': tx_data.value.slot,
+                                        'timestamp': datetime.fromtimestamp(tx_data.value.block_time).isoformat() if tx_data.value.block_time else None,
+                                        'fee': meta.fee / 1e9 if meta.fee else 0
+                                    })
 
                         self.tx_cache[tx_hash] = True
 
@@ -460,3 +513,16 @@ class SolanaWalletTracker:
                 logger.error(f"[WalletWatcher] Error processing wallet {wallet}: {e}")
 
         return result
+    
+    def _extract_account_keys(self, tx_data):
+        txn = tx_data.value.transaction
+        # Nếu là object (solders)
+        if hasattr(txn, "message"):
+            return [str(k) for k in txn.message.account_keys]
+        if hasattr(txn, "transaction") and hasattr(txn.transaction, "message"):
+            return [str(k) for k in txn.transaction.message.account_keys]
+        # Nếu là dict (jsonParsed)
+        if isinstance(txn, dict):
+            msg = txn.get("message", {})
+            return [k for k in msg.get("accountKeys", [])]
+        return []

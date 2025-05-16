@@ -35,7 +35,7 @@ class WalletTrackerFactory:
             return Chain.ETHEREUM
         return None
 
-    # @staticmethod
-    # async def cleanup():
-    #     """Cleanup all Web3 instances"""
-    #     await Chain.cleanup() 
+    @staticmethod
+    async def cleanup():
+        """Cleanup all Web3 instances"""
+        await Chain.cleanup() 

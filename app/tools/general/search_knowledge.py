@@ -4,8 +4,10 @@ from app.core.tool_registry import register_tool
 from app.constants import NodeName
 from app.core.vector_store import VectorStoreManager
 from app.core.mongo_search import MongoSearch
+import logging
+logger = logging.getLogger("uvicorn.error")
 
-async def search_knowledge(query: str, top_k: int = 10, source: Optional[str] = "twitter") -> Dict:
+async def search_knowledge(query: str, top_k: int = 10, source: Optional[str] = "twitter", days_ago: int = 0, min_likes: int = 0, min_reposts: int = 0, user_name: Optional[str] = None) -> Dict:
     """
     Search for relevant knowledge from vector store and MongoDB based on user query
     
@@ -33,13 +35,17 @@ async def search_knowledge(query: str, top_k: int = 10, source: Optional[str] = 
         
         # Get MongoDB search instance
         mongo_search = await MongoSearch.get_instance()
-        
+
+        logger.info(f"Searching MongoDB for query: {query}")
         # Search MongoDB
         mongo_results = await mongo_search.search(
             query=query,
             top_k=top_k,
-            source=source
+            days_ago=days_ago,
+            min_likes=min_likes,
+            min_reposts=min_reposts
         )
+        logger.info(f"MongoDB search results: {mongo_results}")
         
         # Format vector store results
         formatted_vector_results = []
@@ -89,7 +95,7 @@ async def search_knowledge(query: str, top_k: int = 10, source: Optional[str] = 
 
 @register_tool(NodeName.GENERAL_NODE, "search_knowledge")
 @tool
-async def search_knowledge_tool(query: str, top_k: Optional[int] = 10, source: Optional[str] = None) -> Dict:
+async def search_knowledge_tool(query: str, top_k: Optional[int] = 10, source: Optional[str] = None, days_ago: int = 0, min_likes: int = 0, min_reposts: int = 0, user_name: Optional[str] = None) -> Dict:
     """
     Tra cứu nhanh thông tin, tin tức, hoặc quan điểm của các KOL, dự án crypto trên X (Twitter).
 
@@ -102,6 +108,10 @@ async def search_knowledge_tool(query: str, top_k: Optional[int] = 10, source: O
         query (str): Câu hỏi hoặc từ khóa tìm kiếm
         top_k (int, optional): Số lượng kết quả trả về. Mặc định là 10.
         source (str, optional): Nguồn dữ liệu cần tìm kiếm ('twitter' hoặc 'telegram'). Mặc định là tìm tất cả nguồn.
+        days_ago (int, optional): Số ngày gần đây nhất để tìm kiếm. Mặc định là 0.
+        min_likes (int, optional): Số lượng likes tối thiểu. Mặc định là 0.
+        min_reposts (int, optional): Số lượng reposts tối thiểu. Mặc định là 0.
+        user_name (str, optional): Tên người dùng cần tìm kiếm. Mặc định là tìm tất cả người dùng.
         
     Returns:
         Dict chứa kết quả tìm kiếm và metadata:
@@ -122,4 +132,4 @@ async def search_knowledge_tool(query: str, top_k: Optional[int] = 10, source: O
             "error": str
         }
     """
-    return await search_knowledge(query, top_k, source) 
+    return await search_knowledge(query, top_k, source, days_ago, min_likes, min_reposts, user_name) 

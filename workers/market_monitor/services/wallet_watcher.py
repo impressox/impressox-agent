@@ -24,10 +24,10 @@ class WalletWatcher(BaseWatcher):
         self.wallet_types = {}
         self.balance_cache = {}
         self.tx_cache = {}
-
-    # async def cleanup(self):
-    #     """Cleanup resources"""
-    #     await WalletTrackerFactory.cleanup()
+        
+    async def cleanup(self):
+        """Cleanup resources"""
+        await WalletTrackerFactory.cleanup()
 
     async def watch_targets(self):
         try:
@@ -98,15 +98,16 @@ class WalletWatcher(BaseWatcher):
                 tasks = [process_wallet(wallet) for wallet in wallets]
                 results = await asyncio.gather(*tasks, return_exceptions=False)
                 chain_result = {wallet: data for wallet, data in results if data}
-                logger.info(f"[WalletWatcher] Done {chain_name}, {len(chain_result)}/{len(wallets)} wallets have data")
+                logger.info(f"[WalletWatcher] Done {chain_name}, {len(chain_result)}/{len(wallets)} wallets have data: {list(chain_result.keys())}")
                 return chain_name, chain_result
 
             chain_tasks = []
             if evm_wallets:
                 for chain in self.evm_chains:
-                    chain_tasks.append(process_chain(chain, evm_wallets))
+                    # Đảm bảo mỗi ví EVM sẽ được check trên tất cả các chain EVM
+                    chain_tasks.append(process_chain(chain, list(evm_wallets)))
             if solana_wallets:
-                chain_tasks.append(process_chain(self.solana_chain, solana_wallets))
+                chain_tasks.append(process_chain(self.solana_chain, list(solana_wallets)))
 
             all_wallet_data = {}
             if chain_tasks:
@@ -118,6 +119,7 @@ class WalletWatcher(BaseWatcher):
                     chain, data = res
                     if data:
                         all_wallet_data[chain] = data
+                        logger.info(f"[WalletWatcher] Collected {len(data)} wallets for chain {chain}")
 
             if not all_wallet_data:
                 logger.warning("[WalletWatcher] No wallet data received from any chain")

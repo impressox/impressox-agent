@@ -255,7 +255,7 @@ class RuleMatcher:
                         msg += f"• From: <a href='{scan_url}/address/{from_address}'>{from_address}</a>\n"
                         msg += f"• To: <a href='{scan_url}/address/{to_address}'>{to_address}</a>\n"
                         msg += f"• Type: ERC-20\n"
-                        msg += f"• CA: <a href='{scan_url}/token/{token}'>{token}</a>\n"
+                        msg += f"• CA: <code>{token}</code>\n"
                         msg += f"• Amount: {amount} {token_symbol} ({token_name})\n"
                         msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>"
                     elif activity_type == "token_transfer_out":
@@ -273,7 +273,7 @@ class RuleMatcher:
                         msg += f"• From: <a href='{scan_url}/address/{from_address}'>{from_address}</a>\n"
                         msg += f"• To: <a href='{scan_url}/address/{to_address}'>{to_address}</a>\n"
                         msg += f"• Type: ERC-20\n"
-                        msg += f"• CA: <a href='{scan_url}/token/{token}'>{token}</a>\n"
+                        msg += f"• CA: <code>{token}</code>\n"
                         msg += f"• Amount: {amount} {token_symbol} ({token_name})\n"
                         msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>"
                     elif activity_type == "token_trade":
@@ -326,25 +326,76 @@ class RuleMatcher:
                     elif activity_type == "nft_trade":
                         collection = m.get("collection", "Unknown")
                         token_id = m.get("token_id", "Unknown")
-                        token_amount = m.get("token_amount", "N/A")
-                        token_symbol = m.get("token_symbol", "Unknown")
+                        amount = m.get("amount", 1)
+                        direction = m.get("direction", "Trade").capitalize()
+                        counterparty = m.get("counterparty")
+                        price_token_symbol = m.get("price_token_symbol", "")
+                        formatted_price = m.get("formatted_price", "")
+                        scan_url = self.config.get_scan_url(chain)
+                        wallet = m.get("wallet")
+                        wallet_name = m.get("wallet_name", wallet)
+                        tx_hash = m.get("hash", m.get("tx_hash", ""))
+
+                        msg = f"🔔 <b>NFT {direction}</b> on <b>{chain}</b>\n"
+                        msg += f"• Wallet: <a href='{scan_url}/address/{wallet}'>{wallet_name}</a>\n"
+                        if counterparty:
+                            msg += f"• Counterparty: <a href='{scan_url}/address/{counterparty}'>{counterparty}</a>\n"
+                        msg += f"• NFT: <code>{collection}</code> #{token_id}\n"
+                        msg += f"• Amount: {amount}\n"
+                        if formatted_price and price_token_symbol:
+                            msg += f"• Price: {formatted_price} {price_token_symbol}\n"
+                        msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>"
+                    elif activity_type == "nft_transfer_in":
+                        collection = m.get("collection", "Unknown")
+                        token_id = m.get("token_id", "Unknown")
+                        token_amount = m.get("amount", "N/A")
+                        native_symbol = m.get("native_symbol", "")
                         tx_hash = m.get("tx_hash", "")
                         scan_url = self.config.get_scan_url(chain)
-                        msg = f"<b>{wallet}</b> on {chain.upper()}\n"
-                        msg += f"🔸 NFT: {collection} #{token_id}\n"
-                        msg += f"🔸 Amount: {token_amount} {token_symbol}\n"
-                        msg += f"🔸 TX: <a href='{scan_url}{tx_hash}'>{tx_hash}</a>"
-                    elif activity_type == "solana_transfer":
+
+                        msg = f"🔔 <b>NFT Transfer (Received)</b> on <b>{chain.upper()}</b>\n"
+                        msg += f"• Wallet: <a href='{scan_url}/address/{wallet}'>{wallet_name}</a>\n"
+                        msg += f"• NFT: {collection} #{token_id}\n"
+                        msg += f"• Amount: {token_amount} {native_symbol}\n"
+                        msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>"
+                    elif activity_type == "nft_transfer_out":
+                        collection = m.get("collection", "Unknown")
+                        token_id = m.get("token_id", "Unknown")
+                        fee = m.get("fee", "N/A")
+                        tx_hash = m.get("tx_hash", "")
+                        scan_url = self.config.get_scan_url(chain)
+
+                        msg = f"🔔 <b>NFT Transfer (Sent)</b> on <b>{chain.upper()}</b>\n"
+                        msg += f"• Wallet: <a href='{scan_url}/address/{wallet}'>{wallet_name}</a>\n"
+                        msg += f"• NFT: {collection} #{token_id}\n"
+                        msg += f"• Fee: {fee} {native_symbol}\n"
+                        msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>"
+                    
+                    elif activity_type == "native_transfer_in":
+                        # Handle Solana native transfers
+                        amount = m.get("amount", "N/A")
+                        fee = m.get("fee", "N/A")
+                        native_symbol = m.get("native_symbol", "")
+                        tx_hash = m.get("hash", "")
+                        scan_url = self.config.get_scan_url(chain)
+                        
+                        msg = f"🔔 <b>Native Transfer (Received)</b> on <b>{chain.upper()}</b>\n"
+                        msg += f"• Wallet: <a href='{scan_url}/address/{wallet}'>{wallet_name}</a>\n"
+                        msg += f"• Amount: {amount} {native_symbol}\n"
+                        msg += f"• Fee: {fee} {native_symbol}\n"
+                        msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>"
+                    elif activity_type == "native_transfer_out":
                         # Handle Solana native transfers
                         amount = m.get("amount", "N/A")
                         fee = m.get("fee", "N/A")
                         tx_hash = m.get("hash", "")
+                        native_symbol = m.get("native_symbol", "")
                         scan_url = self.config.get_scan_url(chain)
                         
-                        msg = f"🔔 <b>Native Transfer</b> on <b>{chain.upper()}</b>\n"
+                        msg = f"🔔 <b>Native Transfer (Sent)</b> on <b>{chain.upper()}</b>\n"
                         msg += f"• Wallet: <a href='{scan_url}/address/{wallet}'>{wallet_name}</a>\n"
-                        msg += f"• Amount: {amount} SOL\n"
-                        msg += f"• Fee: {fee} SOL\n"
+                        msg += f"• Amount: {amount} {native_symbol}\n"
+                        msg += f"• Fee: {fee} {native_symbol}\n"
                         msg += f"• TX: <a href='{scan_url}/tx/{tx_hash}'>View Transaction</a>"
                     else:
                         # Default message for unknown activity type

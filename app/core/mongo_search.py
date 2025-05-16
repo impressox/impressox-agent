@@ -4,7 +4,7 @@ from app.configs.config import app_configs
 import logging
 from datetime import datetime, timedelta
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
 
 class MongoSearch:
     _instance = None
@@ -28,8 +28,8 @@ class MongoSearch:
         """Initialize MongoDB connection"""
         try:
             mongodb_config = app_configs.get_mongo_config()
-            mongodb_url = mongodb_config["connection"]["data_url"]
-            db_name = mongodb_config.get("data_db_name", "cpx_data")
+            mongodb_url = mongodb_config["connection"]["url"]
+            db_name = mongodb_config.get("data_db_name", "cpx-data")
 
             self.mongo = AsyncIOMotorClient(mongodb_url)
             self.db = self.mongo[db_name]
@@ -53,8 +53,8 @@ class MongoSearch:
             self.collection = None
             self._instance = None
 
-    async def search(self, query: str, top_k: int = 10, source: Optional[str] = None,
-                     min_likes: int = 0, min_reposts: int = 0, days_ago: Optional[int] = None) -> Dict:
+    async def search(self, query: str, top_k: int = 20,days_ago: int = 0,
+                     min_likes: int = 0, min_reposts: int = 0, user_name: Optional[str] = None) -> Dict:
         """
         Full-text search using MongoDB aggregation
         """
@@ -64,15 +64,15 @@ class MongoSearch:
             filters = {
                 "text": {"$ne": None},
             }
-
-            if source:
-                filters["source"] = source
+            
             if min_likes > 0:
                 filters["likes"] = {"$gte": min_likes}
             if min_reposts > 0:
                 filters["reposts"] = {"$gte": min_reposts}
             if days_ago:
                 filters["post_time"] = {"$gte": now - timedelta(days=days_ago)}
+            if user_name:
+                filters["user"] = {"$regex": user_name}
 
             pipeline = [
                 {"$match": {"$text": {"$search": query}}},
@@ -94,7 +94,7 @@ class MongoSearch:
                     "score": 1
                 }}
             ]
-
+            logger.info(f"[MongoSearch] Pipeline: {pipeline}")
             cursor = self.collection.aggregate(pipeline)
             results = []
             async for doc in cursor:
