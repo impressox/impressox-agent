@@ -1,131 +1,180 @@
-# 🧠 ImpressoX – AI Agent for DeFi Wallet Management
+# ImpressoX Project Documentation
 
-**ImpressoX** is your personal AI agent for DeFi, powered by Espresso Network.  
-*Automated. Intelligent. Cross-Chain.*
+## Overview
 
----
+ImpressoX is an AI agent for DeFi wallet management, built to automate and simplify cross-chain operations using the Espresso Network. This documentation covers the project's architecture, components, and development guidelines.
 
 ## Project Status (May 2025)
 
-> **Current State:**
-> ImpressoX has a solid architectural foundation, including an agent orchestrator, node-based processing, a tool registry, and a backend service layer concept. Core prompts for DeFi tasks (swap, alerts, trend/news analysis, portfolio strategy) are designed.
->
-> **Implemented Components:**
-> -   Market monitoring system with rule-based price tracking (Redis-based).
-> -   X-Scraper worker for collecting social media data (Node.js/Puppeteer, stores to MongoDB).
-> -   Basic notification dispatch (integrated with Market Monitor).
-> -   Telegram bot client for interaction.
-> -   Next.js landing page for project promotion.
->
-> **Development Focus / To Be Implemented:**
-> -   **Full Backend Service Layer Implementation**: Formalizing the backend service layer to handle all business logic, data operations, and external integrations is a key ongoing task.
-> -   **Real DeFi/AI Feature Logic**: Most core DeFi features (e.g., actual swap execution, comprehensive wallet anomaly detection, AI-driven news impact analysis) are currently at the prompt/design stage and require full implementation.
-> -   **Blockchain & Espresso Network Integration**: No real integration with blockchain networks or the Espresso Network has been implemented yet. This is a critical next step.
-> -   **Security Guardrails & Automation**: Robust security measures and full automation logic are pending.
-> -   **Other Clients**: Web and Discord clients are planned.
+### Implemented Components
+- ✅ **Core Architecture**
+  - Agent orchestrator and node system
+  - Tool registry and prompt management
+  - Backend service layer concept
+  - Redis-based caching and state management
 
----
+- ✅ **Market Monitoring**
+  - Rule-based price tracking system
+  - Redis rules storage
+  - Price monitoring tools
+  - Basic notification dispatch
 
-## Why ImpressoX?
+- ✅ **Social Data Collection**
+  - X-Scraper worker (Node.js/Puppeteer)
+  - Twitter Scraper (Python alternative)
+  - Airdrop-specific Twitter scraper
+  - MongoDB data storage
 
-Managing DeFi assets is time-consuming, complex, and fragmented. Users often miss market trends, face security risks like frontrunning, and juggle multiple tools for swaps, portfolio tracking, and alerts. ImpressoX aims to unify and automate DeFi wallet management by providing a single, intelligent AI agent. This agent will act, alert, and protect across multiple chains, leveraging the Espresso Network for enhanced privacy, speed, and fair transaction ordering.
+- ✅ **Client Interface**
+  - Telegram bot with session management
+  - Landing page (Next.js)
 
----
+### Under Development
+- 🔄 **Backend Service Layer**
+  - Formalizing the service architecture
+  - Standardizing API-backend communication
+  - Implementing service interfaces
 
-## Core Features (Vision)
+### Planned Features
+- 📋 **Blockchain Integration**
+  - Smart contract development
+  - Espresso Network integration
+  - Cross-chain transaction handling
 
--   🔁 **Automated Cross-Chain Swaps**: Execute token swaps across different blockchains with fair ordering and frontrunning protection via the Espresso Network's fair sequencer.
--   🧠 **Intelligent Wallet Monitoring & Alerts**: Real-time detection of wallet anomalies, potential security risks, and significant balance changes.
--   📈 **Social Trend Detection**: Identify emerging trends and sentiment from social media platforms (e.g., X/Twitter, Telegram) relevant to user assets or interests.
--   🌍 **AI-Powered News Analysis**: Summarize relevant news articles and predict their potential impact on a user's portfolio.
--   🔒 **Enhanced Wallet Security**: Implement transaction guardrails and security checks before execution.
--   💬 **Natural Language Interface**: Interact with the agent through intuitive chat interfaces on multiple platforms (Web, Telegram, Discord).
--   ⚡ **Espresso Native**: Utilize Espresso Network for its privacy features, fast confirmations, and modularity, ensuring secure and efficient operations.
--   💼 **Unified Portfolio Management**: View and manage DeFi assets across multiple chains from a single interface.
+- 📋 **Client Expansion**
+  - Web interface
+  - Discord bot
 
----
+## Project Structure
 
-## Project Structure Overview
-
-ImpressoX is composed of several key modules that work together:
-
--   **`/app`**: The heart of the AI agent. Contains the API (FastAPI), the Backend Service Layer (handling business logic), the Agent Orchestrator, processing Nodes, and Tools. See [`app/README.md`](app/README.md).
--   **`/clients`**: User-facing applications. Currently includes a Telegram bot, with Web and Discord clients planned. See [`clients/README.md`](clients/README.md).
--   **`/workers`**: Background processes for tasks like market monitoring (`market-monitor`), social media scraping (`x-scraper`), and notifications. See [`workers/README.md`](workers/README.md).
--   **`/landing-page`**: A Next.js application for the project's promotional website. See [`../landing-page/README.md`](../landing-page/README.md).
--   **`/contracts`**: (Planned) Solidity smart contracts for on-chain operations and Espresso Network integration. See [`contracts/README.md`](contracts/README.md).
--   **`/configs`**: Centralized YAML configuration files for all services and components.
--   **`/docs`**: This directory, containing detailed project documentation.
--   **`/memory-bank`**: Internal knowledge base for the AI assistant developing this project.
-
-A simplified view:
 ```mermaid
-graph LR
-    subgraph "User Facing"
-        LandingPage["/landing-page (Next.js Website)"]
-        Clients["/clients (Telegram, Web, Discord)"]
+graph TD
+    subgraph "User Interfaces"
+        Clients["/clients - Telegram Bot"]
+        Landing["/landing-page - Next.js Site"]
     end
 
     subgraph "Core System"
-        App["/app (API, Backend Services, Agent Core)"]
+        App["/app - Core Agent"]
+        API["API Layer"]
+        Backend["Backend Services"]
+    end
+
+    subgraph "Background Processing"
+        Workers["/workers"]
+        Market["Market Monitor"]
+        Scrapers["Social Scrapers"]
+        RAG["RAG Processor"]
+        Notify["Notify Worker"]
+    end
+
+    subgraph "Data & Config"
         Configs["/configs"]
+        Redis[(Redis)]
+        MongoDB[(MongoDB)]
+        ChromaDB[(ChromaDB)]
     end
 
-    subgraph "Supporting Systems"
-        Workers["/workers (Market Monitor, X-Scraper, etc.)"]
-        Contracts["/contracts (Planned Solidity Contracts)"]
-        Databases["Databases (Redis, MongoDB, ChromaDB)"]
-    end
-    
-    subgraph "Development & Meta"
-        Docs["/docs (Project Documentation)"]
-        MemoryBank["/memory-bank (AI Dev Context)"]
-    end
-
-    Clients --> App
-    App <--> Workers
-    App <--> Databases
-    App <--> Contracts
-    Workers <--> Databases
-    LandingPage -.-> App % (Indirectly, e.g. for waitlist signups)
+    Clients --> API
+    Landing -.-> API
+    API --> Backend
+    Backend --> App
+    Backend <--> Workers
+    Workers <--> Redis
+    Workers <--> MongoDB
+    App <--> Redis
+    App <--> ChromaDB
 ```
 
----
+## Directory Structure
 
-## Solution & Vision
+```
+impressox-agent/
+├── app/                    # Core AI agent
+│   ├── agents/            # Agent system
+│   ├── nodes/             # Processing nodes
+│   ├── tools/             # Tool implementations
+│   ├── core/              # Core services
+│   ├── cache/             # Caching system
+│   └── prompts/           # LLM prompts
+│
+├── clients/               # Client applications
+│   ├── telegram/          # Telegram bot (active)
+│   └── config.py         # Shared client config
+│
+├── workers/              # Background workers
+│   ├── market_monitor/   # Price monitoring
+│   ├── x-scraper/       # X/Twitter scraping (Node.js)
+│   ├── twitter_scraper/ # Alternative scraper (Python)
+│   ├── airdrop_twitter_scraper/ # Airdrop monitoring
+│   ├── notify_worker/   # Notification handling
+│   └── rag_processor/   # RAG implementation
+│
+├── landing-page/        # Project website (Next.js)
+├── configs/             # Configuration files
+├── docs/               # Documentation
+└── memory-bank/        # AI development context
+```
 
-ImpressoX aims to be the single, indispensable AI agent for all DeFi wallet management needs. It will provide:
--   Smart wallet tracking with proactive risk alerts.
--   AI-assisted and automated swap execution.
--   Detection of market trends and significant movements from diverse data sources.
--   Summarization of news with predictions of its impact on user portfolios.
--   Secure, privacy-preserving, and fair transaction execution, primarily through the Espresso Network.
--   An always-on, intelligent assistant for personal Web3 finance, accessible via natural language.
+## Core Components Documentation
 
----
+Each major component has its own detailed documentation:
 
-## Getting Started
+- [Core Application Guide](app/README.md): Details on the AI agent implementation, including the agent system, nodes, tools, and backend services.
+  
+- [Client Applications Guide](clients/README.md): Documentation for client interfaces, focusing on the current Telegram bot implementation and planned web/Discord clients.
+  
+- [Workers Guide](workers/README.md): Information about background workers for market monitoring, social data collection, and notifications.
+  
+- [Smart Contracts Guide](contracts/README.md): Planned smart contract architecture and Espresso Network integration (future development).
 
-For comprehensive setup instructions for all components (core agent, workers, landing page), please refer to the main [Project README](../README.md).
+## Development Setup
 
-A quick overview for setting up the core application:
-1.  Clone the repository.
-2.  Navigate to the project root.
-3.  Set up environment variables by copying `.env.example` to `.env` and filling in the required values.
-4.  Install Python dependencies: `pip install -r requirements.txt`.
-5.  Run the API server: `bash run_api.sh`.
-6.  Run desired client interfaces (e.g., Telegram bot: `bash run_tele.sh`) and workers (e.g., Market Monitor: `bash run_monitor.sh`).
+### Prerequisites
+- Python 3.9+
+- Node.js 16+ (for x-scraper and landing page)
+- Redis
+- MongoDB
+- ChromaDB (for RAG processor)
 
----
+### Quick Start
+1. Clone the repository
+2. Set up environment variables:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your configurations
+   ```
+3. Install Python dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. Start core services:
+   ```bash
+   # API Server
+   bash run_api.sh
 
-## Contributing
+   # Telegram Bot
+   bash run_tele.sh
 
-We welcome contributions! Please see [CONTRIBUTING.md](../CONTRIBUTING.md) for guidelines on how to contribute to the project, our code of conduct, and the process for submitting pull requests.
+   # Market Monitor
+   bash run_monitor.sh
 
----
+   # Notify Worker
+   bash run_notify_worker.sh
+   ```
 
-## Contact
+For detailed setup instructions for each component, refer to their respective documentation sections.
 
--   **Website (Landing Page)**: (Link to be added when deployed, e.g., impressox.ai)
--   **Email**: [contact@impressox.ai](mailto:contact@impressox.ai) (Example)
--   **Twitter/X**: [@impressox](https://twitter.com/impressox) (Example)
+## Contribution Guidelines
+
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for:
+- Development workflow
+- Code style guides
+- Testing requirements
+- Pull request process
+
+## Contact & Support
+
+- Website: [impressox.ai](https://impressox.ai) (Coming soon)
+- Email: [contact@impressox.ai](mailto:contact@impressox.ai)
+- Twitter/X: [@impressox](https://twitter.com/impressox)
