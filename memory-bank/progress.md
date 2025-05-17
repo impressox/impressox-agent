@@ -2,35 +2,98 @@
 
 ## What Works
 
-- Project memory bank initialized with comprehensive documentation.
-- System architecture đã bổ sung backend service layer (tầng dịch vụ nghiệp vụ, truy xuất dữ liệu, tích hợp hệ thống ngoài, tách biệt với API layer).
-- agent orchestrator, node structure, tool registry, and detailed AI prompts for swap, alert, trend/news, and portfolio are implemented.
-- Codebase aligns with product vision at the design and prompt level.
+### Core Infrastructure
+- Project memory bank initialized and regularly updated
+- System architecture includes a backend service layer (handles business logic, data retrieval, external system integration, separate from the API layer)
+- Agent orchestrator, node structure, tool registry implemented
+- Core prompts for swap, alert, trend/news, and portfolio are in place
+- Tool registration system and execution pipeline operational
+
+### Market Monitor & Social Data
+- Market monitoring system with rule-based price tracking
+- X-scraper worker for social media data collection
+- Redis-based rule storage system
+- MongoDB integration for data persistence
+- Notification dispatch system
+
+### Tools & Integrations
+- `summary_social` tool for X/Twitter content summarization
+- Price tracking and market watching tools
+- Redis checkpointing and caching
+- ELK stack for logging
 
 ## What's Left to Build
 
-- Phát triển backend service layer thực thi nghiệp vụ, chuẩn hóa giao tiếp giữa API và backend, tích hợp worker, automation, và các hệ thống ngoài.
-- Real logic for cross-chain swap execution and portfolio management.
-- Wallet anomaly detection and alerting (beyond prompt).
-- Trend and news monitoring with real data integration.
-- AI-powered news summarization and impact analysis (actual implementation).
-- Security guardrails and transaction validation logic.
-- Blockchain and Espresso Network integration.
-- Multi-platform chat interface (web, Telegram, Discord) with real backend.
-- Automation: scheduled & event-driven tasks with real workflows.
+### Backend & Integration
+- Develop backend service layer to execute business logic, standardize API-backend communication, integrate workers, automation, and external systems
+- Enhance rule matching and notification optimization
+- Implement cross-service monitoring
+- Add more price data sources
+
+### Core Features
+- Real logic for cross-chain swap execution
+- Portfolio management implementation
+- Wallet anomaly detection and alerting
+- AI-powered news analysis system
+- Security guardrails and transaction validation
+
+### Blockchain Integration
+- Smart contract deployment and testing
+- Espresso Network integration
+- Cross-chain transaction handling
+- Wallet security implementation
+
+### Client Interfaces
+- Web application development
+- Telegram bot enhancement
+- Discord bot implementation
+- Multi-platform session management
+
+### Automation & Monitoring
+- Scheduled task system
+- Event-driven workflows
+- System-wide monitoring
+- Performance optimization
 
 ## Current Status (May 2025)
 
-- Most DeFi/AI features are at the prompt and design level only.
-- No real integration with blockchain, external data sources, or the Espresso Network yet.
-- Security guardrails and automation logic are not implemented.
-- Roadmap prioritizes implementing real integrations and automation in upcoming phases.
+### Implemented
+- Market monitoring infrastructure
+- Social data collection system
+- Backend service layer architecture
+- Core tool registration and execution
+- Basic notification system
+
+### In Progress
+- Rule matching enhancements
+- API-backend standardization
+- Worker integration review
+- Service interface documentation
+
+### Pending
+- Real blockchain integration
+- Production security measures
+- Client interface development
+- Automation system implementation
 
 ## Known Issues
 
-- No technical blockers, but major features are not yet implemented beyond prompt/design.
+- Rule matching needs optimization
+- Notification system requires rate limiting
+- Worker coordination needs improvement
+- Documentation requires updates for new features
 
 ## Evolution of Project Decisions
 
-- Documentation-first và cập nhật memory bank đồng bộ với thay đổi kiến trúc (đã bổ sung backend service layer).
-- Next phase: focus on backend logic, real integrations, and automation.
+### Recent Changes
+- Documentation-first approach and memory bank updates synchronized with architectural changes
+- Added market monitoring and social data collection
+- Implemented modular backend service layer
+- Enhanced worker infrastructure
+
+### Next Phase Focus
+- Backend service implementation
+- Real integrations and automation
+- Security and monitoring
+- Cross-service optimization
+- Client interface development

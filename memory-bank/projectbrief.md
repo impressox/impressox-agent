@@ -17,7 +17,7 @@ It aims to automate, secure, and simplify cross-chain wallet management with int
 ## Scope
 
 - Architectural foundation: agent orchestrator, node structure, backend service layer, tool registry, prompt design.
-- Backend service layer: xử lý nghiệp vụ, truy xuất dữ liệu, tích hợp hệ thống ngoài, tách biệt với API layer, cầu nối giữa API, agent core, workers, blockchain, và các hệ thống lưu trữ.
+- Backend service layer: handles business logic, data retrieval, external system integration, separate from the API layer, acts as a bridge between the API, agent core, workers, blockchain, and storage systems.
 - Prompts for swap, alert, trend/news, portfolio analysis.
 - (Planned) Cross-chain swap execution and portfolio management.
 - (Planned) Wallet anomaly detection and alerting.
@@ -35,7 +35,7 @@ It aims to automate, secure, and simplify cross-chain wallet management with int
 
 ## Success Criteria
 
-- [Planned] Backend service layer hoạt động như cầu nối trung gian, đảm bảo xử lý nghiệp vụ, truy xuất dữ liệu, tích hợp hệ thống ngoài một cách hiệu quả và bảo mật.
+- [Planned] Backend service layer functions as an intermediary bridge, ensuring efficient and secure business logic processing, data retrieval, and external system integration.
 - [Planned] Users can manage DeFi assets, swap tokens, and receive alerts in one place.
 - [Planned] No frontrunning or unfair execution due to Espresso integration.
 - [Planned] Users receive actionable insights and security alerts in real time.

@@ -15,7 +15,7 @@ Managing DeFi assets is time-consuming, complex, and fragmented. Users miss tren
 ## How It Should Work
 
 - Users interact via a natural chat interface (web, Telegram, Discord).
-- Backend service layer xử lý nghiệp vụ, truy xuất dữ liệu, tích hợp hệ thống ngoài, làm cầu nối giữa API, agent core, workers, blockchain, và các hệ thống lưu trữ.
+- Backend service layer handles business logic, data retrieval, external system integration, acting as a bridge between the API, agent core, workers, blockchain, and storage systems.
 - The agent monitors wallets, detects anomalies, and sends alerts.
 - AI executes cross-chain swaps with fair ordering (Espresso fair sequencer).
 - Trends and news are detected and summarized, with impact predictions on user portfolios.
@@ -25,7 +25,7 @@ Managing DeFi assets is time-consuming, complex, and fragmented. Users miss tren
 
 - One-stop DeFi wallet management: swap, monitor, alert, analyze.
 - Real-time, actionable insights and security notifications.
-- Backend đảm bảo trải nghiệm realtime, bảo mật, mở rộng tích hợp, và giảm tải cho API/agent.
+- Backend ensures a real-time, secure, and extensible experience, reducing load on the API/agent.
 - Seamless, privacy-first experience with no frontrunning.
 - Always-on, intelligent assistant that understands and acts for the user.
 - Extensible roadmap: trend detection, auto strategies, agent marketplace, SaaS APIs.
