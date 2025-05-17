@@ -29,7 +29,7 @@ graph TD
     subgraph "Data & Cache Layer"
         Redis[(Redis Cache)]
         MongoDB[(MongoDB)]
-        ChromaDB[(ChromaDB)]
+        Qdrant[(Qdrant Vector DB)]
         Checkpoints[Checkpoint System]
     end
 
@@ -46,7 +46,7 @@ graph TD
     
     Tools --> Redis
     Tools --> MongoDB
-    Tools --> ChromaDB
+    Nodes <--> Qdrant
     Orchestrator --> Checkpoints
     Checkpoints --> Redis
 ```
@@ -228,5 +228,5 @@ See `requirements.txt` for complete list. Key dependencies:
 -   FastAPI & uvicorn
 -   Redis (caching, rules)
 -   MongoDB (persistence)
--   ChromaDB (vector store)
+-   Qdrant (vector store)
 -   Langfuse (LLM monitoring)

@@ -27,7 +27,6 @@ ImpressoX is an AI agent for DeFi wallet management, built to automate and simpl
 
 - ✅ **Client Interface**
   - Telegram bot with session management
-  - Landing page (Next.js)
 
 ### Under Development
 - 🔄 **Backend Service Layer**
@@ -49,9 +48,8 @@ ImpressoX is an AI agent for DeFi wallet management, built to automate and simpl
 
 ```mermaid
 graph TD
-    subgraph "User Interfaces"
+    subgraph "User Interface"
         Clients["/clients - Telegram Bot"]
-        Landing["/landing-page - Next.js Site"]
     end
 
     subgraph "Core System"
@@ -72,18 +70,17 @@ graph TD
         Configs["/configs"]
         Redis[(Redis)]
         MongoDB[(MongoDB)]
-        ChromaDB[(ChromaDB)]
+        Qdrant[(Qdrant Vector DB)]
     end
 
     Clients --> API
-    Landing -.-> API
     API --> Backend
     Backend --> App
     Backend <--> Workers
     Workers <--> Redis
     Workers <--> MongoDB
     App <--> Redis
-    App <--> ChromaDB
+    RAG <--> Qdrant
 ```
 
 ## Directory Structure
@@ -108,9 +105,8 @@ impressox-agent/
 │   ├── twitter_scraper/ # Alternative scraper (Python)
 │   ├── airdrop_twitter_scraper/ # Airdrop monitoring
 │   ├── notify_worker/   # Notification handling
-│   └── rag_processor/   # RAG implementation
+│   └── rag_processor/   # RAG implementation with Qdrant
 │
-├── landing-page/        # Project website (Next.js)
 ├── configs/             # Configuration files
 ├── docs/               # Documentation
 └── memory-bank/        # AI development context
@@ -132,10 +128,10 @@ Each major component has its own detailed documentation:
 
 ### Prerequisites
 - Python 3.9+
-- Node.js 16+ (for x-scraper and landing page)
+- Node.js 16+ (for x-scraper)
 - Redis
 - MongoDB
-- ChromaDB (for RAG processor)
+- Qdrant (for RAG processor)
 
 ### Quick Start
 1. Clone the repository
@@ -175,6 +171,5 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for:
 
 ## Contact & Support
 
-- Website: [impressox.ai](https://impressox.ai) (Coming soon)
 - Email: [contact@impressox.ai](mailto:contact@impressox.ai)
 - Twitter/X: [@impressox](https://twitter.com/impressox)

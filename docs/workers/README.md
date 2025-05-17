@@ -9,7 +9,7 @@ graph TD
     subgraph "ImpressoX Core"
         API[API Layer]
         Backend[Backend Services]
-        Databases[(Redis, MongoDB, ChromaDB)]
+        Databases[(Redis & MongoDB)]
     end
 
     subgraph "Market & Price Workers"
@@ -26,6 +26,7 @@ graph TD
     subgraph "Processing Workers"
         NotifyWorker[Notify Worker]
         RAGProcessor[RAG Processor]
+        Qdrant[(Qdrant Vector DB)]
     end
 
     MarketMonitor --> Backend
@@ -43,7 +44,7 @@ graph TD
     NotifyWorker --> Clients[Notification Channels]
     
     RAGProcessor <--> Backend
-    RAGProcessor <--> Databases
+    RAGProcessor <--> Qdrant
 ```
 
 ## Implemented Workers
@@ -121,7 +122,7 @@ graph TD
     ```
 -   **Features**:
     -   Document processing and embedding
-    -   Vector store management
+    -   Vector storage using Qdrant
     -   Knowledge retrieval for LLM context
 
 ## Worker Management
@@ -165,7 +166,7 @@ Each worker typically has:
 ### State Management
 -   Redis for temporary data and rules
 -   MongoDB for persistent storage
--   ChromaDB for vector embeddings
+-   Qdrant for vector embeddings and similarity search
 
 ### Inter-Worker Communication
 -   Redis Pub/Sub for events
