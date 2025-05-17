@@ -1,291 +1,115 @@
-# Smart Contracts
+# ImpressoX Smart Contracts Documentation
 
-Smart contract system of Impressox Agent, enabling blockchain interactions and automated transactions.
+The `contracts/` directory is designated for the smart contract system of the ImpressoX AI Agent. These contracts will enable on-chain interactions, automated transactions, and integration with DeFi protocols, with a strong focus on leveraging the Espresso Network for fair ordering and privacy.
 
-## Smart Contract Architecture
+**Current Status (May 2025):** Smart contract development is a planned phase of the ImpressoX project. Currently, this directory serves as a placeholder for future contract code, tests, and deployment scripts. The information below outlines the envisioned architecture and development approach.
+
+## Envisioned Smart Contract Architecture
+
+The smart contract system will interact with the ImpressoX Backend Service Layer, which will orchestrate calls to the contracts based on agent decisions or user requests.
 
 ```mermaid
-graph TB
-    subgraph Smart Contract System
-        A[Contract Manager] --> B[Solidity Contracts]
-        A --> C[Tests]
-        A --> D[Scripts]
-        
-        B --> E[Deployments]
-        B --> F[Contract ABIs]
-        
-        G[Contract Interactions] --> E
-        G --> F
+graph TD
+    subgraph "ImpressoX Core System"
+        BackendServices[Backend Service Layer]
+        AgentCore[Agent Core Logic]
     end
+
+    subgraph "Blockchain Interaction Layer"
+        ContractProxies[Contract Proxies (Upgradable)]
+        CoreLogicContracts[Core Logic Contracts]
+        UtilityContracts[Utility & Helper Contracts]
+        EspressoIntegration[Espresso Network Integration Points]
+    end
+    
+    subgraph "External Blockchain Environment"
+        EspressoSequencer[Espresso Fair Sequencer]
+        TargetBlockchains[Target Blockchains/Rollups]
+        DeFiProtocols[DeFi Protocols]
+    end
+
+    BackendServices --> ContractProxies
+    ContractProxies --> CoreLogicContracts
+    CoreLogicContracts --> UtilityContracts
+    CoreLogicContracts --> DeFiProtocols
+    CoreLogicContracts --> EspressoIntegration
+    EspressoIntegration --> EspressoSequencer
+    EspressoIntegration --> TargetBlockchains
+    AgentCore --> BackendServices
 ```
 
-## Directory Structure
+## Planned Directory Structure
+
+A typical Hardhat-based structure is anticipated:
 
 ```
 contracts/
-├── solidity/           # Smart contract source code 
-│   ├── core/          # Core contracts
-│   ├── interfaces/    # Contract interfaces
-│   └── libraries/     # Reusable libraries
+├── contracts/          # Solidity smart contract source code (.sol)
+│   ├── core/           # Core ImpressoX logic contracts
+│   ├── interfaces/     # Interfaces for external contracts and standards (e.g., ERC20, ERC721)
+│   ├── libraries/      # Reusable Solidity libraries
+│   └── vendor/         # Third-party contracts (e.g., OpenZeppelin)
 │
-├── tests/             # Test suite
-│   ├── unit/         # Unit tests
-│   └── integration/  # Integration tests
+├── test/               # Contract test suite (JavaScript/TypeScript using Hardhat/Ethers.js)
+│   ├── unit/
+│   └── integration/
 │
-├── scripts/           # Deployment & management scripts
-│   ├── deploy/       # Deployment scripts
-│   └── tasks/        # Hardhat tasks
+├── scripts/            # Deployment and interaction scripts
+│   ├── deploy.ts       # Main deployment script
+│   └── tasks/          # Custom Hardhat tasks
 │
-└── deployments/       # Deployment artifacts
-    ├── mainnet/      # Mainnet deployments
-    └── testnet/      # Testnet deployments
+├── hardhat.config.ts   # Hardhat configuration file
+├── deployments/        # Artifacts of deployed contracts (address, ABI) per network
+└── .env.example        # Environment variable template for private keys, RPC URLs
 ```
 
-## Core Contracts
+## Core Contract Ideas (To Be Developed)
 
-### Contract Development
-```solidity
-// Example smart contract
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+-   **User Wallet Manager**: A contract (or set of contracts) that could act as a smart wallet or interact with users' existing EOA/smart wallets to execute transactions authorized by the ImpressoX agent. This would likely involve meta-transactions or delegated execution.
+-   **Swap Router/Aggregator**: Contracts to facilitate cross-chain or single-chain swaps, potentially interacting with existing DEX aggregators or directly with liquidity pools. Emphasis on routing transactions through Espresso Network for fair sequencing.
+-   **Alert/Automation Registry**: Contracts where users might register specific on-chain conditions for automated actions or alerts (e.g., "if my collateralization ratio drops below X, notify me or attempt to rebalance").
+-   **Access Control Contract**: Manages permissions for the agent or backend services to interact with user-specific contract functionalities.
 
-contract ImpressoxManager {
-    // State variables
-    address public owner;
-    mapping(address => bool) public operators;
+## Development Approach
 
-    // Events
-    event OperatorAdded(address operator);
-    event OperatorRemoved(address operator);
+### Technologies
+-   **Solidity**: For smart contract implementation.
+-   **Hardhat**: For development, testing, and deployment.
+-   **Ethers.js**: For interacting with contracts from scripts and tests.
+-   **OpenZeppelin Contracts**: For secure, standard contract components.
+-   **TypeChain**: For generating TypeScript typings for contracts.
 
-    constructor() {
-        owner = msg.sender;
-    }
-
-    // Modifiers
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Only owner");
-        _;
-    }
-
-    // Functions
-    function addOperator(address _operator) public onlyOwner {
-        operators[_operator] = true;
-        emit OperatorAdded(_operator);
-    }
-}
-```
-
-### Testing
-```typescript
-import { expect } from "chai";
-import { ethers } from "hardhat";
-
-describe("ImpressoxManager", function () {
-  it("Should set the right owner", async function () {
-    const ImpressoxManager = await ethers.getContractFactory("ImpressoxManager");
-    const manager = await ImpressoxManager.deploy();
-    await manager.deployed();
-
-    expect(await manager.owner()).to.equal(await ethers.provider.getSigner(0).getAddress());
-  });
-});
-```
-
-## Development Guide
-
-### Environment Setup
-
-1. Install dependencies:
-```bash
-cd contracts
-npm install
-```
-
-2. Configure networks:
-```javascript
-// hardhat.config.js
-module.exports = {
-  networks: {
-    hardhat: {
-      // Local development
-    },
-    testnet: {
-      url: process.env.TESTNET_RPC,
-      accounts: [process.env.PRIVATE_KEY]
-    },
-    mainnet: {
-      url: process.env.MAINNET_RPC,
-      accounts: [process.env.PRIVATE_KEY]
-    }
-  }
-};
-```
+### Testing Strategy
+-   **Unit Tests**: For individual contract functions and logic.
+-   **Integration Tests**: For interactions between multiple contracts.
+-   **Forked Mainnet/Testnet Tests**: To test interactions with existing DeFi protocols in a realistic environment.
+-   **Coverage**: Aim for high test coverage.
 
 ### Deployment
+-   Scripts for deploying to various networks (local Hardhat network, testnets, Espresso testnet/mainnet, and target rollups/chains).
+-   Verification of contract source code on block explorers.
+-   Use of upgradable proxy patterns (e.g., UUPS or Transparent Proxies) for core logic contracts to allow for future enhancements.
 
-1. Deploy contracts:
-```bash
-# Deploy to testnet
-npx hardhat run scripts/deploy.js --network testnet
+## Espresso Network Integration
 
-# Deploy to mainnet
-npx hardhat run scripts/deploy.js --network mainnet
-```
+A key aspect of ImpressoX's smart contract strategy will be deep integration with the **Espresso Network**. This includes:
+-   Submitting transactions to the Espresso Sequencer to benefit from fair ordering and pre-confirmation privacy.
+-   Designing contracts to be compatible with Espresso's architecture and any specific requirements for rollups utilizing Espresso.
+-   Leveraging Espresso's privacy features where applicable to protect user transaction details.
 
-2. Verify contracts:
-```bash
-npx hardhat verify --network mainnet DEPLOYED_CONTRACT_ADDRESS
-```
+## Security Considerations
 
-### Contract Interactions
+Security will be paramount.
+-   Adherence to smart contract security best practices (e.g., Checks-Effects-Interactions pattern, reentrancy guards).
+-   Comprehensive test suites.
+-   Use of well-audited libraries like OpenZeppelin.
+-   Plans for formal security audits by third-party firms before any mainnet deployment involving significant user funds.
+-   Consideration of timelocks for critical administrative functions.
+-   Emergency stop mechanisms or pausable contracts for critical situations.
 
-#### Web3 Integration
-```typescript
-// Example contract interaction
-import { ethers } from 'ethers';
-import { ImpressoxManager } from './contracts';
+## Monitoring and Maintenance (Future)
 
-async function interactWithContract() {
-  const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
-  const signer = new ethers.Wallet(PRIVATE_KEY, provider);
-  
-  const contract = new ethers.Contract(
-    CONTRACT_ADDRESS,
-    ImpressoxManager.abi,
-    signer
-  );
+-   Off-chain services (potentially workers) will monitor contract events and state.
+-   Scripts for administrative tasks (e.g., upgrading proxies, managing parameters).
 
-  // Call contract methods
-  const tx = await contract.addOperator(OPERATOR_ADDRESS);
-  await tx.wait();
-}
-```
-
-## Security
-
-### Best Practices
-
-1. **Code Security**
-   - Input validation
-   - Access control
-   - Re-entrancy protection
-   - Gas optimization
-
-2. **Testing**
-   - Unit tests
-   - Integration tests
-   - Fuzzing tests
-   - Mainnet forking
-
-3. **Auditing**
-   - Static analysis
-   - Dynamic analysis
-   - Manual review
-   - Third-party audits
-
-### Security Checklist
-
-```markdown
-- [ ] Access control implemented
-- [ ] Input validation
-- [ ] Re-entrancy guards
-- [ ] Event emission
-- [ ] Gas optimization
-- [ ] Error handling
-- [ ] Upgrade mechanism
-- [ ] Emergency stops
-```
-
-## Monitoring & Maintenance
-
-### Contract Monitoring
-- Transaction tracking
-- Event listening
-- Gas usage monitoring
-- Error detection
-
-### Maintenance Tasks
-```typescript
-// Example maintenance task
-task("check-operators", "Checks all operators")
-  .setAction(async (args, hre) => {
-    const contract = await getContract();
-    // Perform checks
-    const activeOperators = await contract.getActiveOperators();
-    console.log("Active operators:", activeOperators);
-  });
-```
-
-## Gas Optimization
-
-### Strategies
-- Batch operations
-- Data packing
-- Memory vs Storage
-- Loop optimization
-
-### Example Optimization
-```solidity
-// Gas optimized mapping access
-contract OptimizedContract {
-    struct UserData {
-        uint256 balance;
-        uint256 timestamp;
-        bool isActive;
-    }
-    
-    mapping(address => UserData) public userData;
-    
-    function updateUser(uint256 _balance) external {
-        UserData storage user = userData[msg.sender];
-        user.balance = _balance;
-        user.timestamp = block.timestamp;
-        user.isActive = true;
-    }
-}
-```
-
-## Upgrade Strategy
-
-### Proxy Pattern
-```solidity
-contract Proxy {
-    address public implementation;
-    address public admin;
-    
-    function upgrade(address newImplementation) external {
-        require(msg.sender == admin, "Only admin");
-        implementation = newImplementation;
-    }
-}
-```
-
-### Version Management
-- Contract versioning
-- State migration
-- Backward compatibility
-- Upgrade coordination
-
-## Documentation
-
-### Contract Documentation
-```solidity
-/// @title ImpressoxManager
-/// @notice Manages operator access and core functionality
-/// @dev Implements access control and operator management
-contract ImpressoxManager {
-    /// @notice Add a new operator
-    /// @param _operator Address of the new operator
-    /// @dev Only callable by contract owner
-    function addOperator(address _operator) public onlyOwner {
-        // Implementation
-    }
-}
-```
-
-### API Documentation
-- Function signatures
-- Event definitions
-- Error codes
-- Integration guides
+This documentation will be updated significantly as smart contract development progresses.

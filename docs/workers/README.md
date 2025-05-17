@@ -1,261 +1,158 @@
-# Workers
+# ImpressoX Workers Documentation
 
-Automated worker system of Impressox Agent, handling background tasks and event processing.
+The `workers/` directory contains various background worker processes that handle automated tasks, data processing, and event-driven actions for the ImpressoX AI Agent.
 
-## Worker Architecture
+## Worker Architecture Overview
+
+ImpressoX workers operate independently but are coordinated with the core application, often through the Backend Service Layer, message queues (like Redis Streams or a dedicated task queue), and shared data stores (Redis, MongoDB).
 
 ```mermaid
-graph TB
-    subgraph Worker System
-        A[Worker Manager] --> B[Scheduled Workers]
-        A --> C[Event Workers]
-        
-        B --> D[Task Queue]
-        C --> D
-        
-        D --> E[Task Processor]
-        E --> F[App Core]
-        
-        G[Monitoring] --> B
-        G --> C
+graph TD
+    subgraph "ImpressoX Core System"
+        APIServer[API Layer]
+        BackendServices[Backend Service Layer]
+        AgentCore[Agent Core Logic]
+        Databases[Databases - Redis, MongoDB]
     end
+
+    subgraph "Worker Subsystem (workers/)"
+        MarketMonitor[Market Monitor Worker]
+        XScraper[X-Scraper Worker]
+        NotifyWorker[Notify Worker]
+        RAGProcessor[RAG Processor (Planned)]
+        ScheduledTasks[Scheduled Tasks (General Framework)]
+        EventListeners[Event Listeners (General Framework)]
+    end
+    
+    subgraph "External Services & Data Sources"
+        BlockchainData[Blockchain Data Providers]
+        SocialMedia[Social Media Platforms - X/Twitter]
+        PriceFeeds[Price Data Feeds]
+        NotificationChannels[Notification Channels - Telegram, Email, etc.]
+    end
+
+    BackendServices <--> Databases
+    BackendServices <--> AgentCore
+    
+    MarketMonitor <--> PriceFeeds
+    MarketMonitor <--> Databases % For rules and price data
+    MarketMonitor --> BackendServices % To trigger notifications or actions
+
+    XScraper <--> SocialMedia
+    XScraper --> Databases % To store scraped data (MongoDB)
+
+    NotifyWorker <--> BackendServices % Receives notification requests
+    NotifyWorker <--> NotificationChannels % Dispatches notifications
+
+    RAGProcessor <--> Databases % For vector store (ChromaDB) and source data
+    RAGProcessor <--> AgentCore % Provides context for LLM
+
+    ScheduledTasks --> BackendServices
+    EventListeners --> BackendServices
 ```
 
-## Scheduled Workers
+## Implemented Workers
 
-### Structure
-```
-workers/scheduled/
-├── tasks/          # Task definitions
-├── schedulers/     # Task schedulers
-├── processors/     # Task processors
-└── utils/         # Utility functions
-```
+### 1. Market Monitor Worker (`workers/market-monitor/`)
 
-### Features
-- Cron-based scheduling
-- Task prioritization
-- Retry mechanisms
-- Error handling
-- Task monitoring
+-   **Purpose**: Monitors cryptocurrency market prices and triggers alerts or actions based on predefined rules.
+-   **Technology**: Python, Redis (for rule storage and price caching), MongoDB (for persistent data if needed).
+-   **Key Components**:
+    -   `monitor.py`: Main script to run the worker.
+    -   `watchers/token_watcher.py`: Watches token prices from various sources.
+    -   `processors/rule_processor.py`: Processes incoming price data against stored rules.
+    -   `processors/rule_matcher.py`: Matches rules with current market conditions.
+    -   `processors/notify_dispatcher.py`: Dispatches notifications when rules are triggered.
+    -   `shared/redis_utils.py`: Utilities for Redis interaction (rule storage, price streams).
+    -   `shared/models.py`: Data models for rules, prices, etc.
+-   **Functionality**:
+    -   Users can define rules (e.g., "alert if BTC price > $70,000") via an API (interfaced by `app/tools/general/watch_market.py`).
+    -   Rules are stored in Redis.
+    -   The worker continuously fetches price data.
+    -   Matches current prices against rules and triggers notifications through the Notify Worker or directly.
+-   **Setup & Running**:
+    1.  Navigate to `workers/market-monitor/`.
+    2.  Create and activate a Python virtual environment.
+    3.  Install dependencies: `pip install -r requirements.txt`.
+    4.  Configure `.env` with Redis, MongoDB connection details, and any API keys for price feeds.
+    5.  Run the worker: `python monitor.py` (or use `run_monitor.sh` from the project root).
 
-### Task Configuration
-```python
-# Example scheduled task
-@scheduled_task(cron="0 0 * * *")  # Run daily at midnight
-async def daily_cleanup():
-    # Clean up old sessions
-    await cleanup_expired_sessions()
-    # Archive old conversations
-    await archive_old_conversations()
-```
+### 2. X-Scraper Worker (`workers/x-scraper/`)
 
-## Event Workers
+-   **Purpose**: Scrapes data (tweets, user profiles) from X (formerly Twitter) for trend analysis and social signal processing.
+-   **Technology**: Node.js, Puppeteer (for browser automation).
+-   **Key Components**:
+    -   `index.js`: Main application script.
+    -   `utils/login.js`: Handles X login.
+    -   `utils/proxyManager.js`: Manages proxies for scraping.
+    -   `utils/mongo.js`: MongoDB interaction for storing scraped data.
+    -   `Dockerfile` & `docker-compose.yml`: For containerized deployment.
+-   **Functionality**:
+    -   Logs into X using provided accounts.
+    -   Scrapes tweets from a list of specified users or based on search queries.
+    -   Stores scraped data in MongoDB.
+    -   Handles rate limiting and proxy rotation to avoid detection.
+-   **Setup & Running**:
+    1.  Navigate to `workers/x-scraper/`.
+    2.  Install Node.js dependencies: `npm install`.
+    3.  Configure `.env` with X account credentials, MongoDB URI, and proxy settings.
+    4.  Provide X accounts in `accounts/x-accounts.txt` and target users in `user_list.txt`.
+    5.  Run the scraper: `node index.js` or using Docker: `docker-compose up --build`.
+    (Refer to `workers/x-scraper/README.md` if available for more detailed instructions).
 
-### Structure
-```
-workers/events/
-├── handlers/       # Event handlers
-├── processors/     # Event processors
-├── queues/        # Event queues
-└── utils/         # Helper functions
-```
+### 3. Notify Worker (Conceptual, integrated within Market Monitor or as a separate service)
 
-### Features
-- Event subscription
-- Real-time processing
-- Queue management
-- Error recovery
-- Event logging
+-   **Purpose**: Handles the dispatch of notifications to users through various channels (Telegram, email, web push, etc.).
+-   **Technology**: Python (can be part of other workers or a standalone FastAPI/Celery service).
+-   **Functionality**:
+    -   Receives notification requests from other components (e.g., Market Monitor, Agent Core).
+    -   Formats messages for specific channels.
+    -   Manages user notification preferences.
+    -   Handles retries and error reporting for notification delivery.
+-   **Current Implementation**: The `workers/market-monitor/processors/notify_dispatcher.py` handles some of this logic for market alerts, primarily targeting Telegram. A more generalized Notify Worker is a future enhancement.
+-   **Setup & Running**: If part of Market Monitor, it runs with it. A standalone worker would have its own setup (e.g., `run_notify_worker.sh`).
 
-### Event Handler
-```python
-# Example event handler
-@event_handler("user.signup")
-async def handle_signup(event_data):
-    # Process user signup
-    user_id = event_data["user_id"]
-    # Initialize user resources
-    await initialize_user_workspace(user_id)
-```
+## Planned Workers
 
-## Worker Management
+### RAG Processor
+-   **Purpose**: To process and embed documents into a vector store (e.g., ChromaDB) for Retrieval Augmented Generation (RAG) with the LLM.
+-   **Functionality**:
+    -   Ingests data from various sources (text files, web pages, database records).
+    -   Chunks and embeds the data.
+    -   Stores embeddings in ChromaDB.
+    -   Provides an interface for the Agent Core to retrieve relevant context.
 
-### Task Queue
-- Priority-based queuing
-- Task scheduling
-- Queue monitoring
-- Rate limiting
+### General Scheduled Task Worker
+-   **Purpose**: A framework for running various scheduled tasks (e.g., daily data cleanup, report generation).
+-   **Technology**: Python with libraries like APScheduler or Celery Beat.
 
-### Job Processing
-- Parallel execution
-- Resource management
-- Error handling
-- Status tracking
+### General Event Listener Worker
+-   **Purpose**: A framework for listening to and processing events from message queues or other event sources.
+-   **Technology**: Python with libraries for message queue interaction (e.g., Redis-py for Redis Streams, Pika for RabbitMQ).
+
+## Worker Management & Best Practices
 
 ### Configuration
-```yaml
-# Example worker config
-worker_config:
-  max_concurrent_tasks: 10
-  retry_limit: 3
-  timeout: 300
-  queue_size: 1000
-```
+-   Workers should be configurable via environment variables and/or YAML files (e.g., `workers/market-monitor/.env`, `workers/x-scraper/.env`).
+-   Centralized configuration management (e.g., in `/configs/`) can be used for shared settings.
 
-## Development Guide
+### Logging & Monitoring
+-   Implement comprehensive logging for all worker activities, errors, and important events.
+-   Integrate with a monitoring system (e.g., ELK Stack, Prometheus/Grafana) to track worker health, performance, and queue lengths.
+-   Langfuse can be used for tracing if workers involve LLM calls.
 
-### Adding New Scheduled Task
+### Error Handling & Resilience
+-   **Retry Mechanisms**: Implement retry logic (e.g., exponential backoff) for transient errors when interacting with external services or databases.
+-   **Dead Letter Queues (DLQs)**: For message-driven workers, use DLQs to handle messages that repeatedly fail processing.
+-   **Idempotency**: Design tasks to be idempotent where possible, so running them multiple times has the same effect as running them once.
+-   **Graceful Shutdown**: Ensure workers can shut down gracefully, finishing current tasks or saving state if possible.
 
-1. Create task definition:
-```python
-from workers.scheduled import scheduled_task
+### Deployment
+-   **Containerization**: Use Docker for consistent deployment environments (Dockerfiles are provided for X-Scraper and Market Monitor).
+-   **Process Management**: Use a process manager (e.g., Supervisor, systemd) or container orchestrator (e.g., Docker Compose, Kubernetes) to keep workers running.
+-   **Scalability**: Design workers to be scalable, potentially by running multiple instances that consume tasks from a shared queue.
 
-@scheduled_task(
-    name="custom_task",
-    cron="*/15 * * * *",  # Run every 15 minutes
-    retry_limit=3
-)
-async def custom_task():
-    # Task implementation
-    pass
-```
-
-2. Configure task properties:
-```python
-task_config = {
-    "timeout": 60,
-    "priority": 1,
-    "retry_delay": 300
-}
-```
-
-### Adding New Event Handler
-
-1. Create event handler:
-```python
-from workers.events import event_handler
-
-@event_handler("custom.event")
-async def handle_custom_event(event_data):
-    # Handler implementation
-    pass
-```
-
-2. Register event subscription:
-```python
-event_config = {
-    "queue": "high_priority",
-    "max_retries": 3,
-    "timeout": 30
-}
-```
-
-## Monitoring & Logging
-
-### Metrics Collection
-- Task completion rates
-- Processing times
-- Error rates
-- Queue lengths
-
-### Logging System
-```python
-# Example logging configuration
-import logging
-
-logging.config.dictConfig({
-    'version': 1,
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-            'level': 'INFO'
-        },
-        'file': {
-            'class': 'logging.FileHandler',
-            'filename': 'worker.log',
-            'level': 'DEBUG'
-        }
-    }
-})
-```
-
-## Error Handling
-
-### Retry Strategy
-- Exponential backoff
-- Max retry limits
-- Error categorization
-- Fallback mechanisms
-
-### Error Recovery
-```python
-# Example retry decorator
-def with_retry(max_retries=3, backoff_factor=2):
-    def decorator(func):
-        async def wrapper(*args, **kwargs):
-            retry_count = 0
-            while retry_count < max_retries:
-                try:
-                    return await func(*args, **kwargs)
-                except Exception as e:
-                    retry_count += 1
-                    if retry_count == max_retries:
-                        raise
-                    await asyncio.sleep(backoff_factor ** retry_count)
-        return wrapper
-    return decorator
-```
-
-## Deployment
-
-### Setup
-```bash
-cd workers
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-### Configuration
-```bash
-# Set environment variables
-export WORKER_QUEUE_TYPE=redis
-export WORKER_CONCURRENCY=5
-export WORKER_LOG_LEVEL=INFO
-```
-
-### Running Workers
-```bash
-# Start scheduled workers
-python -m workers.scheduled
-
-# Start event workers
-python -m workers.events
-```
-
-## Best Practices
-
-1. **Task Design**
-   - Idempotent operations
-   - Atomic transactions
-   - Clear failure states
-   - Progress tracking
-
-2. **Resource Management**
-   - Connection pooling
-   - Memory monitoring
-   - CPU utilization
-   - Disk usage control
-
-3. **Monitoring**
-   - Health checks
-   - Performance metrics
-   - Error tracking
-   - Queue monitoring
-
-4. **Maintenance**
-   - Regular cleanup
-   - Log rotation
-   - Queue pruning
-   - Performance tuning
+### Security
+-   Securely manage API keys, database credentials, and other secrets used by workers (e.g., using environment variables, HashiCorp Vault).
+-   If workers expose any APIs, secure them appropriately.
+-   Be mindful of rate limits and terms of service when interacting with external APIs (especially for scrapers).
