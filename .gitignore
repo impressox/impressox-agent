@@ -69,6 +69,20 @@ docker-compose.override.yml
 # Node modules (if using any JavaScript/Node.js components)
 node_modules/
 
+# Hardhat files
+cache/
+artifacts/
+
+# Test contracts
+contracts/test/
+contracts/*/test/
+contracts/mock/
+contracts/*/mock/
+
+# Coverage 
+coverage/
+coverage.json
+
 # System Files
 .DS_Store
 Thumbs.db
@@ -86,3 +100,5 @@ proxy.txt
 last_run.json
 keyword_accounts.txt
 jupiter_tokenlist_cache.json
+
+myenv
