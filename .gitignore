@@ -74,8 +74,6 @@ cache/
 artifacts/
 
 # Test contracts
-contracts/test/
-contracts/*/test/
 contracts/mock/
 contracts/*/mock/
 

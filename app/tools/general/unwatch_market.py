@@ -89,7 +89,7 @@ async def _unwatch_market_async(tokens: Optional[List[str]] = None, runable_conf
     try:
         # Get all active rules for this user
         storage = await RuleStorage.get_instance()
-        active_rules = await storage.get_active_rules(user_id, "token", conversation_id, chat_type)
+        active_rules = await storage.get_active_rules(user_id, "market", conversation_id, chat_type)
         logger.info(f"[UnwatchMarket] User {user_id} has {len(active_rules)} active rules")
         if not active_rules:
             return {
@@ -181,7 +181,7 @@ async def _unwatch_market_async(tokens: Optional[List[str]] = None, runable_conf
                             json.dumps({
                                 "rule_id": rule["rule_id"],
                                 "user_id": user_id,
-                                "watch_type": "token",
+                                "watch_type": "market",
                                 "target": tokens_to_remove
                             })
                         )
@@ -198,7 +198,7 @@ async def _unwatch_market_async(tokens: Optional[List[str]] = None, runable_conf
                             json.dumps({
                                 "rule_id": rule["rule_id"],
                                 "user_id": user_id,
-                                "watch_type": "token",
+                                "watch_type": "market",
                                 "target": rule["target"]
                             })
                         )

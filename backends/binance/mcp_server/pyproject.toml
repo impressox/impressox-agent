@@ -1,0 +1,32 @@
+[tool.poetry]
+name = "mcp-binance"
+version = "0.1.0"
+description = "Binance MCP Server using Python SDK"
+authors = ["Your Name <your.email@example.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+mcp = "^1.0.0"  # Python MCP SDK
+aiohttp = "^3.8.0"
+pydantic = "^2.0.0"
+fastapi = "^0.100.0"
+uvicorn = "^0.22.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.0.0"
+pytest-asyncio = "^0.21.0"
+black = "^23.0.0"
+isort = "^5.12.0"
+mypy = "^1.0.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+target-version = ['py39']
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3

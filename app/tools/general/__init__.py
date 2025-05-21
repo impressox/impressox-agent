@@ -11,8 +11,9 @@ from app.tools.general.watch_wallet import watch_wallet
 from app.tools.general.unwatch_wallet import unwatch_wallet
 from app.tools.general.watch_airdrop import watch_airdrop
 from app.tools.general.unwatch_airdrop import unwatch_airdrop
-
+from app.tools.general.search_knowledge_binance import search_binance_knowledge, search_x_binance
 from app.tools.general.safe_python_tool import safe_python_tool
+
 
 @register_tool(NodeName.GENERAL_NODE, "get_token_price")
 @tool
@@ -50,5 +51,7 @@ __all__ = [
     "unwatch_wallet",
     "watch_airdrop",
     "unwatch_airdrop",
-    "safe_python_tool"
+    "safe_python_tool",
+    "search_binance_knowledge",
+    "search_x_binance"
 ]

@@ -7,7 +7,7 @@ from app.core.mongo_search import MongoSearch
 import logging
 logger = logging.getLogger("uvicorn.error")
 
-async def search_knowledge(query: str, top_k: int = 10, source: Optional[str] = "twitter", days_ago: int = 0, min_likes: int = 0, min_reposts: int = 0, user_name: Optional[str] = None) -> Dict:
+async def search_knowledge(query: str, top_k: int = 10, source: Optional[str] = "twitter", days_ago: int = 0, min_likes: int = 0, min_reposts: int = 0) -> Dict:
     """
     Search for relevant knowledge from vector store and MongoDB based on user query
     
@@ -38,13 +38,12 @@ async def search_knowledge(query: str, top_k: int = 10, source: Optional[str] = 
 
         logger.info(f"Searching MongoDB for query: {query}")
         # Search MongoDB
-        mongo_results = await mongo_search.search(
+        mongo_results = await mongo_search.search_binance(
             query=query,
             top_k=top_k,
             days_ago=days_ago,
             min_likes=min_likes,
-            min_reposts=min_reposts,
-            user_name=user_name
+            min_reposts=min_reposts
         )
         logger.info(f"MongoDB search results: {mongo_results}")
         
@@ -94,15 +93,35 @@ async def search_knowledge(query: str, top_k: int = 10, source: Optional[str] = 
             "error": f"Error searching knowledge: {str(e)}"
         }
 
-@register_tool(NodeName.GENERAL_NODE, "search_knowledge")
+@register_tool(NodeName.GENERAL_NODE, "search_binance_knowledge")
 @tool
-async def search_knowledge_tool(query: str, top_k: Optional[int] = 10, source: Optional[str] = None, days_ago: int = 0, min_likes: int = 0, min_reposts: int = 0, user_name: Optional[str] = None) -> Dict:
+async def search_binance_knowledge() -> Dict:
     """
-    Tra cứu nhanh thông tin, tin tức, hoặc quan điểm của các KOL, dự án crypto trên X (Twitter).
+    Tra cứu và cung cấp nhanh tất cả các thông tin liên quan đến hệ sinh thái Binance:
+    - Tổng quan về Binance và các sản phẩm/dịch vụ của Binance (như Binance Earn, Launchpad, Futures…)
+    - Thông tin chi tiết về Binance Alpha, bao gồm cách tham gia, hướng dẫn tính điểm Binance Alpha, các chương trình thưởng và quy đổi điểm.
+    - Tin tức, cập nhật mới nhất từ Binance, phân tích các dự án do Binance phát hành hoặc hỗ trợ.
+    - Các tài liệu, hướng dẫn chính thức từ Binance (có trích dẫn nguồn).
 
     ✅ Dùng khi:
-    - User hỏi về diễn biến mới nhất liên quan đến Elon Musk, các nhân vật nổi tiếng, hoặc trend trên crypto Twitter.
-    - Cần tìm lại tweet đã nhúng có liên quan đến một dự án, token, hoặc chủ đề cụ thể.
+    - Người dùng hỏi bất kỳ vấn đề nào về Binance, các sản phẩm/dịch vụ hoặc chương trình mới của Binance.
+    - Người dùng cần giải thích về Binance Alpha, quy chế, cách tính hoặc sử dụng điểm Binance Alpha.
+    - Cần cập nhật tin tức, sự kiện mới nhất liên quan đến Binance và các dự án trong hệ sinh thái Binance.
+    - Muốn trích dẫn nguồn chính thống từ Binance để lập luận, giải thích hoặc cung cấp bối cảnh.
+    """
+     # Get MongoDB search instance
+    mongo_search = await MongoSearch.get_instance()
+    return await mongo_search.search_binance_knowledge() 
+
+@register_tool(NodeName.GENERAL_NODE, "search_x_binance")
+@tool
+async def search_x_binance(query: str, top_k: Optional[int] = 10, source: Optional[str] = None, days_ago: int = 0, min_likes: int = 0, min_reposts: int = 0) -> Dict:
+    """
+    Tra cứu nhanh thông tin về binance trên X (Twitter)
+
+    ✅ Dùng khi:
+    - User hỏi về diễn biến mới nhất liên quan đến binance trên X (Twitter)
+    - Cần tìm lại tweet đã nhúng có liên quan đến binance trên X (Twitter)
     - Muốn trích dẫn nguồn tweet để hỗ trợ lập luận hoặc hiểu thêm bối cảnh.
 
     Args:
@@ -112,7 +131,6 @@ async def search_knowledge_tool(query: str, top_k: Optional[int] = 10, source: O
         days_ago (int, optional): Số ngày gần đây nhất để tìm kiếm. Mặc định là 0.
         min_likes (int, optional): Số lượng likes tối thiểu. Mặc định là 0.
         min_reposts (int, optional): Số lượng reposts tối thiểu. Mặc định là 0.
-        user_name (str, optional): Tên người dùng cần tìm kiếm. Mặc định là tìm tất cả người dùng.
         
     Returns:
         Dict chứa kết quả tìm kiếm và metadata:
@@ -133,4 +151,5 @@ async def search_knowledge_tool(query: str, top_k: Optional[int] = 10, source: O
             "error": str
         }
     """
-    return await search_knowledge(query, top_k, source, days_ago, min_likes, min_reposts, user_name) 
+
+    return await search_knowledge(query, top_k, source, days_ago, min_likes, min_reposts) 

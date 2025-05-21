@@ -5,6 +5,7 @@ import os
 import logging
 from typing import Dict, List, Optional
 from bson import ObjectId
+import asyncio
 
 from workers.market_monitor.services.base import BaseWatcher
 from workers.market_monitor.shared.models import Rule
@@ -115,19 +116,24 @@ class TokenWatcher(BaseWatcher):
                     logger.error(f"[TokenWatcher] Error getting rules for token {token}: {e}")
                     continue
 
-            # Get token data from CoinGecko only if there are rules that need price watching
+            # Run get_token_data and get_alert_data concurrently
             token_data = {}
+            alert_matches = []
+            
             if watch_price_rules:
-                token_data = await self.get_token_data(list(self.watching_targets), target_data)
+                # Run both API calls concurrently
+                token_data, alert_matches = await asyncio.gather(
+                    self.get_token_data(list(self.watching_targets), target_data),
+                    self.get_alert_data()
+                )
+                
                 if not token_data:
                     logger.warning("[TokenWatcher] No token data received from API")
                 else:
                     logger.info(f"[TokenWatcher] Received token data: {self._serialize_to_json(token_data)}")
-
-            # Get alert data using original symbols
-            alert_matches = await self.get_alert_data()
-            if alert_matches:
-                logger.info(f"[TokenWatcher] Received {len(alert_matches)} alert messages")
+                    
+                if alert_matches:
+                    logger.info(f"[TokenWatcher] Received {len(alert_matches)} alert messages")
 
             # Get all active token rules
             active_rules = []
@@ -174,6 +180,10 @@ class TokenWatcher(BaseWatcher):
             token_mapping = {}  # Map CoinGecko IDs back to original symbols
             logger.debug(f"[TokenWatcher] Target data: {target_data}")
             for token in tokens:
+                if token == "*":
+                    logger.warning("[TokenWatcher] Wildcard token '*' is not supported")
+                    continue
+                # Check if token is in target_data
                 if target_data and token in target_data:
                     coin_gc_id = target_data[token].get("coin_gc_id")
                     if coin_gc_id:
@@ -190,6 +200,9 @@ class TokenWatcher(BaseWatcher):
                     token_mapping[token.lower()] = token
                     logger.debug(f"[TokenWatcher] Using lowercase symbol for {token}: {token.lower()}")
 
+            if not token_ids or len(token_ids) == 0:
+                logger.warning("[TokenWatcher] No valid token IDs found for API call")
+                return {}
             # Join tokens with comma for API call
             token_ids_str = ','.join(token_ids)
             logger.info(f"[TokenWatcher] Fetching data from CoinGecko for tokens: {token_ids_str}")
