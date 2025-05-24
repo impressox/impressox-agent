@@ -46,20 +46,16 @@ contract AggregatorProxy is ReentrancyGuard {
     ) internal returns (bool) {
         if (amount == 0) return true;
         
+        bool success = true;
         if (token == address(0)) {
-            (bool success,) = recipient.call{value: amount}("");
-            if (success) {
-                emit TokensTransferred(token, recipient, amount);
-            }
-            return success;
+            (success,) = recipient.call{value: amount}("");
+            if (!success) return false;
+        } else {
+            IERC20(token).safeTransfer(recipient, amount);
         }
-        
-        try IERC20(token).safeTransfer(recipient, amount) {
-            emit TokensTransferred(token, recipient, amount);
-            return true;
-        } catch {
-            return false;
-        }
+
+        emit TokensTransferred(token, recipient, amount);
+        return true;
     }
 
     function _processFees(

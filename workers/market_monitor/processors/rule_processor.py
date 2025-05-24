@@ -108,7 +108,7 @@ class RuleProcessor:
                 # Store in Redis for each target
                 for target in rule.target:
                     # Use watch_type from rule
-                    redis_key = f"watch:active:{rule.watch_type}:{target}"
+                    redis_key = f"watch:active:{rule.watch_type.value}:{target}"
                     logger.info(f"[RuleProcessor] Storing rule in Redis key: {redis_key}")
                     
                     # Store full rule data
@@ -125,10 +125,10 @@ class RuleProcessor:
 
                 # Publish rule activated event
                 await self.redis.publish(
-                    f"{rule.watch_type}_watch:rule_activated",
+                    f"{rule.watch_type.value}_watch:rule_activated",
                     json.dumps({
                         "rule_id": str(rule.rule_id),
-                        "watch_type": rule.watch_type,
+                        "watch_type": rule.watch_type.value,
                         "target": rule.target
                     })
                 )
@@ -152,7 +152,7 @@ class RuleProcessor:
                 return False
 
             # Validate watch type
-            if not rule.watch_type or rule.watch_type not in self.watch_types:
+            if not rule.watch_type or rule.watch_type.value not in self.watch_types:
                 return False
 
             # Validate condition if present

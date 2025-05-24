@@ -10,6 +10,8 @@ from clients.telegram.utils.permissions import check_group_permissions
 from clients.telegram.services.chat_history import get_chat_history_service
 from clients.telegram.utils.logger import logger
 from clients.telegram.utils.redis_util import publish_notify_on, publish_notify_off
+from clients.telegram.services.auth_service import get_auth_service
+from clients.config import DEX_AGGREGATOR_URL
 import asyncio
 
 def extract_ai_response(api_result):
@@ -84,6 +86,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         logger.info(f"Received message from {username} ({user_id}) in {chat_type} {chat_id}: {user_message}")
 
+        # Get auth service and try to authenticate
+        auth_service = get_auth_service()
+        try:
+            auth_service.ensure_authenticated(
+                telegram_id=user_id,
+                name=user.full_name,
+                email=user.email if hasattr(user, 'email') else None
+            )
+        except Exception as e:
+            logger.error(f"Error in authentication: {e}")
+            # Continue without auth token if there's an error
+
+        # Continue with message processing
         # Save all messages to chat history
         try:
             chat_history_service = await get_chat_history_service()
@@ -199,6 +214,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "reply_to_message_id": str(update.message.reply_to_message.message_id) if update.message.reply_to_message else None,
                     "reply_to_user_id": str(update.message.reply_to_message.from_user.id) if update.message.reply_to_message and update.message.reply_to_message.from_user else None,
                     "replied_message_content": replied_message_content,
+
+                    # Auth info
+                    "auth_token": auth_service.token,
+                    "is_new_user": auth_service.is_new_user,
+                    "dex_aggregator_url": DEX_AGGREGATOR_URL
                 }
                 
                 logger.debug(f"Configurable dict: {configurable_dict}")

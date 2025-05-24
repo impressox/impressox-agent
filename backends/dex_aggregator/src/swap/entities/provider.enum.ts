@@ -1,0 +1,24 @@
+export enum DexProvider {
+  // EVM Chains
+  ONEINCH = 'ONEINCH',
+  LIFI = 'LIFI',
+  PANCAKESWAP = 'PANCAKESWAP',
+  UNISWAP = 'UNISWAP',
+  SUSHISWAP = 'SUSHISWAP',
+  CURVE = 'CURVE',
+  BALANCER = 'BALANCER',
+  
+  // Solana
+  JUPITER = 'JUPITER',
+  RAYDIUM = 'RAYDIUM',
+  TITAN = 'TITAN',
+  ORCA = 'ORCA',
+  
+  // Cosmos
+  OSMOSIS = 'OSMOSIS',
+  THORCHAIN = 'THORCHAIN',
+  
+  // Move
+  APTOSWAP = 'APTOSWAP',
+  LIQUIDSWAP = 'LIQUIDSWAP'
+} 

@@ -43,8 +43,12 @@ class Rule(BaseModel):
         return cls(**data)
 
     def to_dict(self) -> Dict:
-        """Convert Rule instance to dictionary"""
-        return self.dict()
+        d = self.dict()
+        d["watch_type"] = self.watch_type.value if isinstance(self.watch_type, Enum) else self.watch_type
+        d["notify_channel"] = self.notify_channel.value if isinstance(self.notify_channel, Enum) else self.notify_channel
+        d["created_at"] = self.created_at.isoformat()
+        d["updated_at"] = self.updated_at.isoformat()
+        return d
 
 @dataclass
 class RuleMatch:
